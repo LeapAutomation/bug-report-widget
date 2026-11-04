@@ -2,7 +2,7 @@
 
 A portable, in-app bug-reporting feature. One floating 🐛 button captures the screen, lets users (and AI agents) file structured reports, and drops them into a review queue with an audit trail.
 
-The design pattern that motivated this lives at [design-patterns/bug-report-pattern.md](https://github.com/kmoy007/design-patterns) — read that first if you want the *why*. This repo is the implementation: a portable widget plus reference backends in two languages, kept honest by a shared API spec and a cross-stack test suite.
+The design pattern that motivated this lives at [design-patterns/bug-report-pattern.md](https://github.com/LeapAutomation/leaphq-design-patterns) — read that first if you want the *why*. This repo is the implementation: a portable widget plus reference backends in two languages, kept honest by a shared API spec and a cross-stack test suite.
 
 Owned by Leap Automation Ltd and released under the MIT License (see [LICENSE](LICENSE) and [NOTICE](NOTICE)). Created by Ken Moynihan and assigned to Leap Automation Ltd on 4 November 2026, when the repository moved from `kmoy007` to `LeapAutomation`.
 
