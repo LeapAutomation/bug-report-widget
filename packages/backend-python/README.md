@@ -5,7 +5,7 @@ Flask blueprint implementing the [bug-report API spec](../spec/openapi.yaml). Pl
 ## Install
 
 ```bash
-pip install "bug-report-py @ git+https://github.com/kmoy007/bug-report-widget.git#subdirectory=packages/backend-python"
+pip install "bug-report-py @ git+https://github.com/LeapAutomation/bug-report-widget.git#subdirectory=packages/backend-python"
 ```
 
 ## Use

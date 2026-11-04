@@ -12,5 +12,11 @@
     "test": "node --test tests/*.test.js"
   },
   "keywords": ["bug-report", "triage", "admin", "queue"],
-  "license": "MIT"
+  "author": "Leap Automation Ltd",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LeapAutomation/bug-report-widget.git",
+    "directory": "packages/triage-ui"
+  }
 }

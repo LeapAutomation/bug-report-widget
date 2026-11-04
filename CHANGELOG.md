@@ -2,6 +2,13 @@
 
 All notable changes to this monorepo.
 
+## Ownership — 2026-11-04
+
+- The repository moved from `kmoy007/bug-report-widget` to `LeapAutomation/bug-report-widget`; GitHub
+  redirects the old URLs. Copyright is now Leap Automation Ltd (LICENSE, new NOTICE); package `author`
+  and `repository` fields and README install snippets point at the new home. No code, version or tag
+  changed: `backends-v2.1.1` and the widget commits the apps pin are the same objects.
+
 ## widget v1.6.8 — 2026-10-26
 
 From the daily report (hq.helloleap.ai/daily-report): its floating "Run report again" button was

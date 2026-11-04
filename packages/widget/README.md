@@ -7,8 +7,8 @@ Self-injecting vanilla-JS module. One `<script>` tag, you're done.
 ### Copy-paste (any stack)
 
 ```bash
-curl -O https://raw.githubusercontent.com/kmoy007/bug-report-widget/main/packages/widget/src/bug-report.js
-curl -O https://raw.githubusercontent.com/kmoy007/bug-report-widget/main/packages/widget/src/html2canvas.min.js
+curl -O https://raw.githubusercontent.com/LeapAutomation/bug-report-widget/main/packages/widget/src/bug-report.js
+curl -O https://raw.githubusercontent.com/LeapAutomation/bug-report-widget/main/packages/widget/src/html2canvas.min.js
 ```
 
 Drop both into your `static/` (or `public/`) directory and reference them:
@@ -21,7 +21,7 @@ Drop both into your `static/` (or `public/`) directory and reference them:
 ### npm (Node consumers)
 
 ```bash
-npm install github:kmoy007/bug-report-widget#main
+npm install github:LeapAutomation/bug-report-widget#main
 ```
 
 Then either bundle `bug-report-widget/src/bug-report.js` with your usual tool, or copy the two files to your public dir at build time.
