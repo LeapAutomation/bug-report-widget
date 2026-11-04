@@ -4,7 +4,7 @@ version = "2.1.1"
 description = "Flask blueprint + storage interface implementing the bug-report-widget API spec."
 readme = "README.md"
 license = { text = "MIT" }
-authors = [{ name = "Ken Moynihan" }]
+authors = [{ name = "Leap Automation Ltd" }]
 requires-python = ">=3.10"
 dependencies = [
     "Flask>=2.0",

@@ -5,7 +5,7 @@ Express router implementing the [bug-report API spec](../spec/openapi.yaml). Plu
 ## Install
 
 ```bash
-npm install github:kmoy007/bug-report-widget#main
+npm install github:LeapAutomation/bug-report-widget#main
 # (uses the package at packages/backend-node via its package.json entry)
 ```
 

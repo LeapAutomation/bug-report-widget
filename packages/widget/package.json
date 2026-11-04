@@ -21,11 +21,11 @@
     "html2canvas",
     "widget"
   ],
-  "author": "Ken Moynihan",
+  "author": "Leap Automation Ltd",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kmoy007/bug-report-widget.git",
+    "url": "git+https://github.com/LeapAutomation/bug-report-widget.git",
     "directory": "packages/widget"
   }
 }

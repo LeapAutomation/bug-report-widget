@@ -5,7 +5,7 @@
 ## Install
 
 ```bash
-pip install "bug-report-cli @ git+https://github.com/kmoy007/bug-report-widget.git#subdirectory=packages/cli"
+pip install "bug-report-cli @ git+https://github.com/LeapAutomation/bug-report-widget.git#subdirectory=packages/cli"
 ```
 
 ## Configure

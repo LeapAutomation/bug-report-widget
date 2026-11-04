@@ -4,7 +4,7 @@ version = "1.0.0"
 description = "CLI for filing bug reports against any bug-report-widget backend. Usable by humans and AI agents."
 readme = "README.md"
 license = { text = "MIT" }
-authors = [{ name = "Ken Moynihan" }]
+authors = [{ name = "Leap Automation Ltd" }]
 requires-python = ">=3.10"
 dependencies = []
 
