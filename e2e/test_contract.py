@@ -191,3 +191,39 @@ def test_screenshot_type_is_sniffed_not_trusted(backend_url):
 def test_screenshot_404_when_missing(backend_url):
     bid = requests.post(backend_url, json={"details": "no shot"}).json()["id"]
     assert requests.get(f"{backend_url}/{bid}/screenshot").status_code == 404
+
+
+# ----- names (backends 2.2.0) ----------------------------------------
+# Both backends keep and serve the display names; neither has a mailer in this
+# harness, so `notify` must not produce a `notified` block and canNotify is false.
+
+def test_names_are_stored_and_served(backend_url):
+    bid = requests.post(backend_url, json={
+        "details": "names", "actorEmail": "ana.reporter@example.com", "actorName": "Ana Reporter",
+    }).json()["id"]
+    requests.patch(f"{backend_url}/{bid}", json={
+        "status": "triaged", "changedBy": "sam.closer@example.com", "changedByName": "Sam Closer",
+    })
+    rec = requests.get(f"{backend_url}/{bid}").json()
+    assert rec["actorName"] == "Ana Reporter"
+    assert rec["audit"][0]["changedByName"] == "Ana Reporter"
+    assert (rec["audit"][1]["changedBy"], rec["audit"][1]["changedByName"]) == (
+        "sam.closer@example.com", "Sam Closer")
+    row = next(r for r in requests.get(backend_url).json()["bugs"] if r["id"] == bid)
+    assert row["actorName"] == "Ana Reporter"
+
+
+def test_unknown_names_are_empty_strings_not_missing(backend_url):
+    bid = requests.post(backend_url, json={"details": "no names"}).json()["id"]
+    rec = requests.get(f"{backend_url}/{bid}").json()
+    assert rec["actorName"] == ""
+    assert rec["audit"][0]["changedByName"] == ""
+
+
+def test_without_a_mailer_can_notify_is_false_and_notify_is_inert(backend_url):
+    bid = requests.post(backend_url, json={"details": "no mailer", "actorEmail": "ana@example.com"}).json()["id"]
+    assert requests.get(f"{backend_url}/{bid}").json()["canNotify"] is False
+    assert "canNotify" not in requests.get(backend_url).json()["bugs"][0]
+    r = requests.patch(f"{backend_url}/{bid}", json={"status": "triaged", "note": "x", "notify": True})
+    assert r.status_code == 200 and "notified" not in r.json()
+    assert len(r.json()["audit"]) == 2  # filed, triaged: no emailed row

@@ -20,6 +20,8 @@ export interface BugCreate {
   tags?: string[] | string;
   addedBy?: string;
   actorEmail?: string;
+  /** Display name of the person filing, when not derivable from auth (backends 2.2.0). */
+  actorName?: string;
   metaUrl?: string;
   metaUserAgent?: string;
   metaBuildSha?: string;
@@ -39,6 +41,8 @@ export interface BugSummary {
   status: Status;
   addedBy: string;
   actorEmail?: string;
+  /** Display name of whoever filed it; "" when unknown (backends 2.2.0). */
+  actorName?: string;
   addedAt: string;
   screenshot: boolean;
 }
@@ -46,6 +50,8 @@ export interface BugSummary {
 export interface AuditEntry {
   changedAt: string;
   changedBy?: string;
+  /** Display name of changedBy; "" when unknown (backends 2.2.0). */
+  changedByName?: string;
   fromStatus: Status | null;
   toStatus: Status;
   note?: string;
@@ -57,7 +63,26 @@ export interface Bug extends BugSummary {
   metaUserAgent?: string;
   metaBuildSha?: string;
   transcript?: TranscriptTurn[] | null;
+  /** GET /bugs/{id} only: the server can email the reporter and the report has an address (backends 2.2.0). */
+  canNotify?: boolean;
+  /** PATCH response only, when `notify` was requested (backends 2.2.0). */
+  notified?: Notified;
   audit: AuditEntry[];
+}
+
+export interface Notified {
+  ok: boolean;
+  to: string;
+  error?: string;
+}
+
+/** PATCH /bugs/{id} body. `notify` emails the reporter on a change to resolved/declined and needs `note`. */
+export interface BugPatch {
+  status: Status;
+  note?: string;
+  changedBy?: string;
+  changedByName?: string;
+  notify?: boolean;
 }
 
 export interface ApiError {

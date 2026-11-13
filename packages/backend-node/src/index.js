@@ -31,6 +31,9 @@ export { BUG_DETAILS_MAX, BUG_SCREENSHOT_MAX, BUG_STATUSES, newBugId, validBugId
 
 const DEFAULT_ALLOW = () => true;
 
+// A row written before backends 2.2.0 has no name; the wire says "" then.
+const withChangedByName = (a) => ({ ...a, changedByName: a.changedByName || "" });
+
 export function createBugsRouter(opts = {}) {
   const store = opts.store;
   if (!store) throw new Error("createBugsRouter: opts.store is required");
@@ -63,6 +66,7 @@ export function createBugsRouter(opts = {}) {
     let title = (payload.title || details.split("\n")[0]).slice(0, 100).trim();
     let addedBy = String(payload.addedBy || "web").trim().slice(0, 32) || "web";
     const actorEmail = String(payload.actorEmail || defaultActorEmail || "").trim().slice(0, 200);
+    const actorName = String(payload.actorName || "").trim().slice(0, 200);
 
     let tags = payload.tags || ["bug"];
     if (typeof tags === "string") tags = tags.split(",").map(s => s.trim()).filter(Boolean);
@@ -95,6 +99,7 @@ export function createBugsRouter(opts = {}) {
       status: "open",
       addedBy,
       actorEmail,
+      actorName,
       addedAt: nowIso(),
       metaUrl: String(payload.metaUrl || "").slice(0, 500),
       metaUserAgent: String(payload.metaUserAgent || "").slice(0, 300),
@@ -108,6 +113,7 @@ export function createBugsRouter(opts = {}) {
       toStatus: "open",
       fromStatus: null,
       changedBy: actorEmail || addedBy,
+      changedByName: actorName,
       note: "filed",
     });
 
@@ -143,7 +149,8 @@ export function createBugsRouter(opts = {}) {
       throw e;
     }
     const full = toBugFull(rec);
-    full.audit = await store.listAudit(rec.id);
+    full.canNotify = false;  // this backend has no mailer
+    full.audit = (await store.listAudit(rec.id)).map(withChangedByName);
     res.json(full);
   });
 
@@ -165,12 +172,14 @@ export function createBugsRouter(opts = {}) {
     }
     const note = String(payload.note || "").slice(0, 500);
     const changedBy = String(payload.changedBy || defaultActorEmail || "admin").slice(0, 200);
+    const changedByName = String(payload.changedByName || "").trim().slice(0, 200);
+    // `notify` is accepted and ignored: no mailer here, so no `notified` either.
 
     const oldStatus = rec.status;
     if (newStatus === oldStatus) {
       // No-op: skip audit.
       const full = toBugFull(rec);
-      full.audit = await store.listAudit(rec.id);
+      full.audit = (await store.listAudit(rec.id)).map(withChangedByName);
       return res.json(full);
     }
 
@@ -180,11 +189,12 @@ export function createBugsRouter(opts = {}) {
       toStatus: newStatus,
       fromStatus: oldStatus,
       changedBy,
+      changedByName,
       note,
     });
 
     const full = toBugFull(updated);
-    full.audit = await store.listAudit(rec.id);
+    full.audit = (await store.listAudit(rec.id)).map(withChangedByName);
     res.json(full);
   });
 

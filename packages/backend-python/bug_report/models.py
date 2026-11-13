@@ -53,3 +53,21 @@ def new_bug_id() -> str:
 
 def valid_bug_id(bug_id: str) -> bool:
     return bool(_BUG_ID_RE.match(bug_id or ""))
+
+
+def person_name(name: str | None, email: str | None) -> str:
+    """The display name of a person: the stored ``name``, else one derived from
+    the address's local part (``chris.hamblin@x`` -> ``Chris Hamblin``, ``ken@x``
+    -> ``Ken``), else "". The same rule the UI uses; the two must agree."""
+    name = (name or "").strip()
+    if name:
+        return name
+    local = (email or "").strip().split("@", 1)[0]
+    parts = [p for p in re.split(r"[._-]+", local) if p]
+    return " ".join(p[:1].upper() + p[1:] for p in parts)
+
+
+def first_name(name: str | None, email: str | None = "") -> str:
+    """First word of :func:`person_name`."""
+    full = person_name(name, email)
+    return full.split(None, 1)[0] if full else ""

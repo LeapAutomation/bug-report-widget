@@ -304,6 +304,45 @@ for (const [name, makeStore] of STORES) {
 }
 
 // ---------------------------------------------------------------------
+// Names (backends 2.2.0): passed through; no mailer, so notify is ignored
+// ---------------------------------------------------------------------
+
+for (const [name, makeStore] of STORES) {
+  test(`[${name}] names are stored and served; notify is ignored (no notified, canNotify false)`, async () => {
+    await withApp(makeStore, null, async ({ server }) => {
+      const json = { "Content-Type": "application/json" };
+      const id = (await (await fetch(url(server, "/bugs"), {
+        method: "POST", headers: json,
+        body: JSON.stringify({ details: "d", actorEmail: "ana@example.com", actorName: "Ana Reporter" }),
+      })).json()).id;
+      const patched = await (await fetch(url(server, `/bugs/${id}`), {
+        method: "PATCH", headers: json,
+        body: JSON.stringify({ status: "declined", note: "no", notify: true, changedBy: "sam@example.com", changedByName: "Sam Closer" }),
+      })).json();
+      assert.equal("notified" in patched, false);
+      const got = await (await fetch(url(server, `/bugs/${id}`))).json();
+      assert.equal(got.actorName, "Ana Reporter");
+      assert.equal(got.canNotify, false);
+      assert.equal(got.audit[0].changedByName, "Ana Reporter");
+      assert.deepEqual([got.audit[1].changedBy, got.audit[1].changedByName], ["sam@example.com", "Sam Closer"]);
+      const list = await (await fetch(url(server, "/bugs"))).json();
+      assert.equal(list.bugs[0].actorName, "Ana Reporter");
+    });
+  });
+
+  test(`[${name}] a report filed without a name says "" and its audit rows say ""`, async () => {
+    await withApp(makeStore, null, async ({ server }) => {
+      const id = (await (await fetch(url(server, "/bugs"), {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ details: "d" }),
+      })).json()).id;
+      const got = await (await fetch(url(server, `/bugs/${id}`))).json();
+      assert.equal(got.actorName, "");
+      assert.equal(got.audit[0].changedByName, "");
+    });
+  });
+}
+
+// ---------------------------------------------------------------------
 // Single-store sanity tests
 // ---------------------------------------------------------------------
 

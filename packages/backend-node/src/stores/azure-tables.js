@@ -72,6 +72,7 @@ function entityToBugRecord(e) {
     status: e.Status || "open",
     addedBy: e.AddedBy || "web",
     actorEmail: e.ActorEmail || "",
+    actorName: e.ActorName || "",
     addedAt: e.AddedAt || "",
     metaUrl: e.MetaUrl || "",
     metaUserAgent: e.MetaUserAgent || "",
@@ -92,6 +93,7 @@ function bugRecordToEntity(rec) {
     AddedBy: rec.addedBy,
     AddedAt: rec.addedAt,
     ActorEmail: rec.actorEmail || "",
+    ActorName: rec.actorName || "",
     MetaUrl: rec.metaUrl || "",
     MetaUserAgent: rec.metaUserAgent || "",
     MetaBuildSha: rec.metaBuildSha || "",
@@ -244,6 +246,7 @@ export class AzureTablesStore {
       FromStatus: entry.fromStatus || "",
       ToStatus: entry.toStatus || "",
       ChangedBy: entry.changedBy || "",
+      ChangedByName: entry.changedByName || "",
       ChangedAt: entry.changedAt || new Date().toISOString(),
       Note: entry.note || "",
       Action: entry.fromStatus === null || entry.fromStatus === "" ? "create" : "transition",
@@ -263,6 +266,7 @@ export class AzureTablesStore {
           fromStatus: e.FromStatus || null,
           toStatus: e.ToStatus || "",
           changedBy: e.ChangedBy || "",
+          changedByName: e.ChangedByName || "",
           note: e.Note || "",
         });
       }

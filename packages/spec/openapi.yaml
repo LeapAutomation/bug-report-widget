@@ -108,6 +108,15 @@ paths:
       description: |
         Implementations MUST write an audit row on every successful
         transition and MUST be no-op when status == current status.
+
+        `notify` (backends 2.2.0, optional, default false) asks the server to
+        email the reporter. It is acted on only when the status actually
+        changes to `resolved` or `declined`; reopening never emails. It
+        requires a non-empty `note` (else 400). The change and its audit row
+        are written first; a failed send never undoes it. After the send a
+        second audit row (from = to = the new status) records the outcome.
+        The response carries `notified` when notify was requested. A server
+        with no mailer (the Node backend) ignores `notify`.
       operationId: patchBug
       requestBody:
         required: true
@@ -125,6 +134,13 @@ paths:
                 changedBy:
                   type: string
                   description: Admin identity, when not derivable from auth.
+                changedByName:
+                  type: string
+                  description: Display name for changedBy, when not derivable from auth.
+                notify:
+                  type: boolean
+                  default: false
+                  description: Email the reporter (see above). Needs `note`.
       responses:
         "200":
           description: Updated bug
@@ -216,6 +232,9 @@ components:
         actorEmail:
           type: string
           format: email
+        actorName:
+          type: string
+          description: Display name of the person filing, when not derivable from auth.
         metaUrl:
           type: string
           format: uri
@@ -294,8 +313,15 @@ components:
           type: array
           items: { type: string }
         status: { $ref: "#/components/schemas/Status" }
+        kind:
+          type: string
+          enum: [bug, feature]
+          description: Derived from the tags (report-contract.json `kinds`, `kindTags`); a feature request is tagged `feature`.
         addedBy: { type: string }
         actorEmail: { type: string }
+        actorName:
+          type: string
+          description: Display name of whoever filed it ("" when unknown). Backends 2.2.0.
         addedAt: { type: string, format: date-time }
         screenshot:
           type: boolean
@@ -311,6 +337,19 @@ components:
             metaUrl: { type: string }
             metaUserAgent: { type: string }
             metaBuildSha: { type: string }
+            canNotify:
+              type: boolean
+              description: |
+                GET /bugs/{id} only (backends 2.2.0). True when this server can
+                email the reporter and the report has an `actorEmail`.
+            notified:
+              type: object
+              description: PATCH response only, when `notify` was requested.
+              required: [ok, to]
+              properties:
+                ok: { type: boolean }
+                to: { type: string }
+                error: { type: string }
             transcript:
               type: array
               items: { $ref: "#/components/schemas/TranscriptTurn" }
@@ -325,6 +364,9 @@ components:
       properties:
         changedAt: { type: string, format: date-time }
         changedBy: { type: string }
+        changedByName:
+          type: string
+          description: Display name of changedBy ("" when unknown). Backends 2.2.0.
         fromStatus:
           oneOf:
             - $ref: "#/components/schemas/Status"

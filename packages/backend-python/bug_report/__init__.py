@@ -16,6 +16,7 @@ in ../../e2e enforce that this and the Node backend stay honest.
 """
 
 from .blueprint import create_blueprint
+from .email import AcsNotifier, Notice, render
 from .store import (
     Store,
     StoreError,
@@ -28,6 +29,8 @@ from .models import (
     BUG_SCREENSHOT_MAX,
     BUG_STATUSES,
     new_bug_id,
+    person_name,
+    first_name,
     valid_bug_id,
 )
 
@@ -48,6 +51,9 @@ from .contract import (
 
 __all__ = [
     "create_blueprint",
+    "AcsNotifier",
+    "Notice",
+    "render",
     "contract",
     "KINDS",
     "TRANSITIONS",
@@ -68,4 +74,6 @@ __all__ = [
     "BUG_STATUSES",
     "new_bug_id",
     "valid_bug_id",
+    "person_name",
+    "first_name",
 ]

@@ -25,6 +25,7 @@ class BugCreate(TypedDict, total=False):
     tags: list[str] | str
     addedBy: str
     actorEmail: str
+    actorName: str  # display name of the person filing, when not derivable from auth (backends 2.2.0)
     metaUrl: str
     metaUserAgent: str
     metaBuildSha: str
@@ -41,6 +42,7 @@ class BugSummary(TypedDict):
     status: Status
     addedBy: str
     actorEmail: NotRequired[str]
+    actorName: NotRequired[str]  # "" when unknown (backends 2.2.0)
     addedAt: str
     screenshot: bool
 
@@ -48,6 +50,7 @@ class BugSummary(TypedDict):
 class AuditEntry(TypedDict):
     changedAt: str
     changedBy: NotRequired[str]
+    changedByName: NotRequired[str]  # "" when unknown (backends 2.2.0)
     fromStatus: Status | None
     toStatus: Status
     note: NotRequired[str]
@@ -59,7 +62,23 @@ class Bug(BugSummary):
     metaUserAgent: NotRequired[str]
     metaBuildSha: NotRequired[str]
     transcript: NotRequired[list[TranscriptTurn] | None]
+    canNotify: NotRequired[bool]  # GET /bugs/<id> only (backends 2.2.0)
+    notified: NotRequired["Notified"]  # PATCH response only, when notify was requested (backends 2.2.0)
     audit: list[AuditEntry]
+
+
+class Notified(TypedDict):
+    ok: bool
+    to: str
+    error: NotRequired[str]
+
+
+class BugPatch(TypedDict, total=False):
+    status: Status  # required
+    note: str
+    changedBy: str
+    changedByName: str
+    notify: bool  # email the reporter on resolved/declined; needs note (backends 2.2.0)
 
 
 class ApiError(TypedDict):

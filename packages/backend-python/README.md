@@ -38,6 +38,27 @@ Routes mounted (under the prefix you pass):
 | PATCH  | /bugs/{id}                 | `is_admin`      |
 | GET    | /bugs/{id}/screenshot      | open            |
 
+## Emailing the reporter on close (2.2.0)
+
+```python
+# pip install "bug-report-py[email]"   # azure-communication-email, azure-identity
+from bug_report import create_blueprint, AcsNotifier
+
+create_blueprint(
+    store=store,
+    actor_identity=lambda req: {"email": signed_in_address(req), "name": signed_in_name(req)},
+    notifier=AcsNotifier.from_env(),   # None when not configured: no emails, no tick box
+    app_url="https://sv.example.com",  # linked when the report has no page URL
+)
+```
+
+`PATCH {status, note, notify: true}` on a change to `resolved`/`declined` writes the change and its audit row, then
+emails the reporter and writes a second audit row with the outcome. A failed send never undoes the change; the
+response carries `notified: {ok, to, error?}`. Environment for `AcsNotifier.from_env()`: `ACS_ENDPOINT` (managed
+identity; `BUG_NOTIFY_CLIENT_ID` for a user-assigned one) or `ACS_CONNECTION_STRING`, `BUG_NOTIFY_SENDER`,
+`BUG_NOTIFY_DOMAINS` (comma list; an address outside it is refused). Any `notifier(notice) -> message id` that
+raises on failure works in its place.
+
 Open-by-default for POST and single-bug GET is deliberate: any user (or agent) can file, and the user who filed should be able to read back their own report. Tighten in your own auth wrapper if your threat model needs it.
 
 ## Stores
