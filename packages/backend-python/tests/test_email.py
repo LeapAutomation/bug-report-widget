@@ -105,8 +105,11 @@ def test_signed_by_the_derived_closer_name_or_the_service():
 # ----- AcsNotifier --------------------------------------------------------------
 
 class FakePoller:
-    def __init__(self, result):
-        self.result_value, self.timeout = result, "unset"
+    def __init__(self, result, done=True):
+        self.result_value, self.timeout, self.finished = result, "unset", done
+
+    def done(self):
+        return self.finished
 
     def result(self, timeout=None):
         self.timeout = timeout
@@ -114,13 +117,14 @@ class FakePoller:
 
 
 class FakeClient:
-    def __init__(self, result=None):
+    def __init__(self, result=None, done=True):
         self.result = result if result is not None else {"id": "op-1", "status": "Succeeded"}
+        self.done = done
         self.messages, self.poller = [], None
 
     def begin_send(self, message):
         self.messages.append(message)
-        self.poller = FakePoller(self.result)
+        self.poller = FakePoller(self.result, self.done)
         return self.poller
 
 
@@ -173,6 +177,13 @@ def test_no_sender_refuses_fail_closed():
     with pytest.raises(RuntimeError, match="BUG_NOTIFY_SENDER"):
         make(c, sender="")(notice())
     assert c.messages == []
+
+
+@pytest.mark.parametrize("seen", [None, {"id": "x", "status": "Running"}])
+def test_a_send_not_confirmed_within_the_wait_is_a_failure_not_emailed(seen):
+    # LROPoller.result(timeout) returns, not raises, when the wait runs out.
+    with pytest.raises(RuntimeError, match="had not confirmed"):
+        make(FakeClient(seen or {}, done=False))(notice())
 
 
 def test_a_send_that_does_not_succeed_raises():

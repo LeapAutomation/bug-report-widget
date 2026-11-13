@@ -34,7 +34,7 @@ from .models import first_name, person_name
 log = logging.getLogger(__name__)
 
 FROM_NAME = "Leap bug reports"
-SEND_TIMEOUT = 60  # seconds the poller may be waited on; bounded, never forever
+SEND_TIMEOUT = 30  # seconds the poller may be waited on: bounded, and short enough for a click in the Bugs panel
 
 
 @dataclass
@@ -215,7 +215,12 @@ class AcsNotifier:
             if name:
                 reply["displayName"] = name
             message["replyTo"] = [reply]
-        result = self._get_client().begin_send(message).result(timeout=self.timeout)
+        poller = self._get_client().begin_send(message)
+        result = poller.result(timeout=self.timeout)
+        # A wait that runs out returns whatever the poller last saw (None, or
+        # a "Running" status), not an error: never audit that as "emailed".
+        if not poller.done():
+            raise RuntimeError(f"ACS had not confirmed the send after {self.timeout:g} s; it may still arrive")
         get = result.get if isinstance(result, dict) else (lambda k, d=None: getattr(result, k, d))
         status = getattr(get("status"), "value", get("status"))
         if status is not None and str(status).lower() != "succeeded":
