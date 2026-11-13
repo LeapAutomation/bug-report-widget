@@ -313,6 +313,10 @@ components:
           type: array
           items: { type: string }
         status: { $ref: "#/components/schemas/Status" }
+        kind:
+          type: string
+          enum: [bug, feature]
+          description: Derived from the tags (report-contract.json `kinds`, `kindTags`); a feature request is tagged `feature`.
         addedBy: { type: string }
         actorEmail: { type: string }
         actorName:

@@ -74,11 +74,12 @@ a report can now carry a note and email the person who filed it, and people are 
 - **New: `bug_report.email`** — `Notice`, `render(notice) -> (subject, html)` (everything escaped) and
   `AcsNotifier`, an Azure Communication Services Email sender modelled on leap-daily-report's, behind
   the `[email]` extra (`azure-communication-email`, `azure-identity`). `AcsNotifier.from_env()` reads
-  `ACS_ENDPOINT` (managed identity; `AZURE_CLIENT_ID` picks a user-assigned one) or `ACS_CONNECTION_STRING`,
+  `ACS_ENDPOINT` (managed identity; `BUG_NOTIFY_CLIENT_ID` picks a user-assigned one, its own name so it never changes the identity the rest of the app uses) or `ACS_CONNECTION_STRING`,
   `BUG_NOTIFY_SENDER` and `BUG_NOTIFY_DOMAINS`, and returns `None` when any is missing, so
   `notifier=AcsNotifier.from_env()` just does not email when unset. Fails closed: an address outside
   `BUG_NOTIFY_DOMAINS` is refused before anything is sent. SDK retries are off (`retry_total=0`) and the
-  wait on the send is bounded (60 s).
+  wait on the send is bounded (30 s); a send ACS has not confirmed by then is audited as failed, not
+  sent.
 - **New: people are named.** Reports gain `actorName` and audit rows `changedByName` (`""` when unknown;
   the UI derives "Chris Hamblin" from `chris.hamblin@…` the same way `bug_report.person_name` does).
   `actor_identity` may return `{"email": …, "name": …}` as well as a bare address, and now also stamps

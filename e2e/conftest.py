@@ -87,6 +87,60 @@ def python_server(tmp_path_factory):
 
 
 # ---------------------------------------------------------------------------
+# Python backend with a mailer — the notify path over real HTTP (2.2.0)
+# ---------------------------------------------------------------------------
+
+PY_MAILER_SCRIPT = """
+import json, sys
+sys.path.insert(0, r"{pkg}")
+from flask import Flask, request
+from bug_report import create_blueprint, FilesystemStore
+
+def notifier(n):
+    # A stand-in for AcsNotifier: records what it was asked to send, and fails
+    # on cue so the failure path is driven over HTTP too.
+    if "FAIL" in n.note:
+        raise RuntimeError("mail server said no")
+    with open(r"{outbox}", "a") as f:
+        f.write(json.dumps(n.__dict__) + "\\n")
+    return "msg-1"
+
+def who(req):
+    return {{"email": req.headers.get("X-Test-User", ""), "name": req.headers.get("X-Test-Name", "")}}
+
+app = Flask(__name__)
+app.register_blueprint(create_blueprint(
+    store=FilesystemStore(r"{state}"), is_admin=lambda req: True,
+    actor_identity=who, notifier=notifier, app_url="https://app.example/",
+))
+app.run(host="127.0.0.1", port={port}, use_reloader=False)
+"""
+
+
+@pytest.fixture(scope="session")
+def python_mailer_server(tmp_path_factory):
+    port = _free_port()
+    state = tmp_path_factory.mktemp("py-mail-state")
+    outbox = tmp_path_factory.mktemp("py-mail-out") / "outbox.jsonl"
+    script = PY_MAILER_SCRIPT.format(pkg=str(PY_PKG), state=str(state), port=port, outbox=str(outbox))
+    log = tmp_path_factory.mktemp("py-mail-log") / "out.log"
+    with open(log, "w") as logf:
+        proc = subprocess.Popen([sys.executable, "-c", script], stdout=logf, stderr=subprocess.STDOUT)
+    base = f"http://127.0.0.1:{port}/bugs"
+    try:
+        try:
+            _wait_alive(base)
+        except RuntimeError:
+            tail = log.read_text()[-2000:] if log.exists() else "(no log)"
+            raise RuntimeError(f"python mailer backend failed to start. log tail:\n{tail}")
+        yield base, outbox
+    finally:
+        proc.terminate()
+        try: proc.wait(timeout=3)
+        except subprocess.TimeoutExpired: proc.kill()
+
+
+# ---------------------------------------------------------------------------
 # Node backend — Express subprocess
 # ---------------------------------------------------------------------------
 

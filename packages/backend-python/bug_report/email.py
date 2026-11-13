@@ -12,8 +12,10 @@ without the extra; an app that passes no notifier never emails.
 
 Environment read by :meth:`AcsNotifier.from_env`:
 
-``ACS_ENDPOINT``            managed identity (``DefaultAzureCredential``;
-                            ``AZURE_CLIENT_ID`` picks a user-assigned identity)
+``ACS_ENDPOINT``            managed identity (``DefaultAzureCredential``)
+``BUG_NOTIFY_CLIENT_ID``    the user-assigned identity to send as; its own name,
+                            not ``AZURE_CLIENT_ID``, so it cannot change which
+                            identity the rest of the app signs in as
 ``ACS_CONNECTION_STRING``   fallback when there is no endpoint
 ``BUG_NOTIFY_SENDER``       the From address, e.g. ``bugs@helloleap.ai``
 ``BUG_NOTIFY_DOMAINS``      comma list of domains it may write to; an address
@@ -175,7 +177,7 @@ class AcsNotifier:
             log.warning("bug notify: BUG_NOTIFY_DOMAINS not set; emailing reporters is off (fail closed)")
             return None
         return cls(sender=sender, domains=domains, endpoint=endpoint,
-                   connection_string=conn, client_id=env.get("AZURE_CLIENT_ID", ""))
+                   connection_string=conn, client_id=env.get("BUG_NOTIFY_CLIENT_ID", ""))
 
     def _get_client(self):
         if self._client is None:

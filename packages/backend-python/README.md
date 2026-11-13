@@ -55,7 +55,7 @@ create_blueprint(
 `PATCH {status, note, notify: true}` on a change to `resolved`/`declined` writes the change and its audit row, then
 emails the reporter and writes a second audit row with the outcome. A failed send never undoes the change; the
 response carries `notified: {ok, to, error?}`. Environment for `AcsNotifier.from_env()`: `ACS_ENDPOINT` (managed
-identity; `AZURE_CLIENT_ID` for a user-assigned one) or `ACS_CONNECTION_STRING`, `BUG_NOTIFY_SENDER`,
+identity; `BUG_NOTIFY_CLIENT_ID` for a user-assigned one) or `ACS_CONNECTION_STRING`, `BUG_NOTIFY_SENDER`,
 `BUG_NOTIFY_DOMAINS` (comma list; an address outside it is refused). Any `notifier(notice) -> message id` that
 raises on failure works in its place.
 

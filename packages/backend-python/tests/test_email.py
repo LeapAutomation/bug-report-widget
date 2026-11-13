@@ -216,7 +216,7 @@ def test_from_env_is_none_with_nothing_set():
 
 
 def test_from_env_reads_the_config():
-    n = AcsNotifier.from_env({**GOOD, "BUG_NOTIFY_DOMAINS": "a.com, b.com", "AZURE_CLIENT_ID": "cid"})
+    n = AcsNotifier.from_env({**GOOD, "BUG_NOTIFY_DOMAINS": "a.com, b.com", "BUG_NOTIFY_CLIENT_ID": "cid"})
     assert (n.sender, n.domains, n.endpoint, n.client_id) == (
         "bugs@example.com", ("a.com", "b.com"), "https://comms.example", "cid")
 
@@ -252,7 +252,7 @@ def azure(monkeypatch):
 
 
 def test_endpoint_uses_managed_identity_with_retries_off(azure):
-    n = AcsNotifier.from_env({**GOOD, "AZURE_CLIENT_ID": "cid"})
+    n = AcsNotifier.from_env({**GOOD, "BUG_NOTIFY_CLIENT_ID": "cid"})
     assert n(notice()) == "e"
     assert azure["cred"] == {"managed_identity_client_id": "cid"}
     assert azure["endpoint"] == ("https://comms.example", "CRED", {"retry_total": 0})
