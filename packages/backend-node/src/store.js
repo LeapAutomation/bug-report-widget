@@ -29,6 +29,7 @@ export function makeBugRecord(o) {
     status: o.status || "open",
     addedBy: o.addedBy || "web",
     actorEmail: o.actorEmail || "",
+    actorName: o.actorName || "",
     addedAt: o.addedAt,
     metaUrl: o.metaUrl || "",
     metaUserAgent: o.metaUserAgent || "",
@@ -46,6 +47,7 @@ export function toBugSummary(rec) {
     status: rec.status,
     addedBy: rec.addedBy,
     actorEmail: rec.actorEmail,
+    actorName: rec.actorName || "",
     addedAt: rec.addedAt,
     screenshot: !!rec.screenshot,
   };

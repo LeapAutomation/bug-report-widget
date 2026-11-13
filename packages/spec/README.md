@@ -48,3 +48,11 @@ consuming apps) with a test asserting the two agree.
 The field names are the ones the implementations already spoke, not the
 ones any single one of them used internally — `screenshot` is a boolean
 ("is there one"), because that is what every backend here emits.
+
+## People are named; closing can email the reporter (backends 2.2.0)
+
+All additive and optional, so older data and older clients keep working:
+
+- `actorName` on a report and `changedByName` on an audit row: the display name beside the address. `""` when unknown. A reader derives a name from the address when it is empty (split the local part on `.` `_` `-`, capitalise each part: `chris.hamblin@x` is "Chris Hamblin", `ken@x` is "Ken"); the first name is the first word.
+- `canNotify` on `GET /bugs/{id}` only: this server can email the reporter and the report has an `actorEmail`.
+- `PATCH` takes `notify: true` (default false). It is acted on only when the status actually changes to `resolved` or `declined` (reopening never emails), needs a non-empty `note`, and writes the change and its audit row before the send. The response gains `notified: {ok, to, error?}`; a second audit row (from = to = the new status) records `emailed <name> <address>` or `email to <name> <address> failed: <reason>`. The Node backend has no mailer: it ignores `notify` and returns no `notified`.

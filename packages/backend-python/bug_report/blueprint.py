@@ -7,17 +7,20 @@ from __future__ import annotations
 
 import base64
 import io
+import logging
 import time
 from typing import Callable
 
 from flask import Blueprint, abort, jsonify, request, send_file
 
 from . import contract
+from .email import Notice
 from .models import (
     BUG_DETAILS_MAX,
     BUG_SCREENSHOT_MAX,
     BUG_STATUSES,
     new_bug_id,
+    person_name,
     screenshot_content_type,
     valid_bug_id,
 )
@@ -28,6 +31,7 @@ from .store import (
     Store,
 )
 
+log = logging.getLogger(__name__)
 
 _last_now_ns = 0
 
@@ -63,6 +67,8 @@ def create_blueprint(
     actor_identity: Callable | None = None,
     build_sha: str | Callable[[], str] = "",
     url_prefix: str = "/bugs",
+    notifier: Callable | None = None,
+    app_url: str = "",
 ) -> Blueprint:
     """Build a Flask blueprint that serves the bug-report API.
 
@@ -71,17 +77,25 @@ def create_blueprint(
         is_admin: ``(request) -> bool`` gate for ``GET /bugs`` and ``PATCH``.
                   Default: allow everything (suitable for single-user apps).
         default_actor_email: Email stamped on reports filed without one.
-        actor_identity: ``(request) -> str`` returning the CHECKED identity of
-                  the person filing (e.g. from EasyAuth's principal). When
+        actor_identity: ``(request) -> str | dict`` returning the CHECKED identity
+                  of the person filing (e.g. from EasyAuth's principal): an
+                  address, or ``{"email": ..., "name": ...}`` (2.2.0). When
                   given, it alone decides the report's ``actorEmail``: the
                   payload's ``actorEmail`` is ignored, because a page can
                   claim any address, and an empty answer files the report
                   with no actor rather than with the claim. Without it the
-                  payload's value is used, as before. Added in 2.1.0.
+                  payload's value is used, as before. Added in 2.1.0. The
+                  same identity stamps ``changedBy``/``changedByName`` on a
+                  status change (2.2.0), replacing the request body's claim.
         build_sha: String or zero-arg callable returning the current build SHA.
                    Stamped on each report. Empty string means "unknown".
         url_prefix: Mount path within the blueprint. Outer app typically
                     mounts the whole blueprint under ``/api``.
+        notifier: ``(Notice) -> str`` that emails the reporter when a PATCH
+                  closes their report with ``notify: true``; returns a message
+                  id, raises on failure (2.2.0). See ``bug_report.email``.
+                  ``None``: no email is ever sent.
+        app_url: Link used in the email when the report has no page URL.
     """
     if is_admin is None:
         is_admin = lambda req: True  # noqa: E731 — single-user default
@@ -95,6 +109,18 @@ def create_blueprint(
             except Exception:
                 return ""
         return build_sha or ""
+
+    def _identity(req) -> tuple[str, str]:
+        """(email, name) from the identity hook; a str answer is an address
+        only. An unreadable identity is no identity, never a 500."""
+        try:
+            who = actor_identity(req)
+        except Exception:
+            return "", ""
+        if isinstance(who, dict):
+            return (str(who.get("email") or "").strip()[:200],
+                    str(who.get("name") or "").strip()[:200])
+        return (who or "").strip()[:200], ""
 
     # ----- POST /bugs ---------------------------------------------------
 
@@ -114,14 +140,12 @@ def create_blueprint(
         title = (payload.get("title") or details.splitlines()[0])[:100].strip()
         added_by = (payload.get("addedBy") or payload.get("added_by") or "web").strip()[:32] or "web"
         if actor_identity is not None:
-            try:
-                actor_email = (actor_identity(request) or "").strip()[:200]
-            except Exception:  # an identity that cannot be read is no identity, never a 500
-                actor_email = ""
+            actor_email, actor_name = _identity(request)
         else:
             actor_email = (
                 payload.get("actorEmail") or payload.get("actor_email") or default_actor_email
             ).strip()[:200]
+            actor_name = str(payload.get("actorName") or payload.get("actor_name") or "").strip()[:200]
 
         tags = payload.get("tags") or ["bug"]
         if isinstance(tags, str):
@@ -157,6 +181,7 @@ def create_blueprint(
             status="open",
             added_by=added_by,
             actor_email=actor_email,
+            actor_name=actor_name,
             added_at=_now_iso(),
             meta_url=(payload.get("metaUrl") or payload.get("meta_url") or "")[:500],
             meta_user_agent=(payload.get("metaUserAgent") or payload.get("meta_user_agent") or "")[:300],
@@ -169,6 +194,7 @@ def create_blueprint(
             to_status="open",
             from_status=None,
             changed_by=actor_email or added_by,
+            changed_by_name=actor_name,
             note="filed",
         ))
         return jsonify({"id": bug.id}), 201
@@ -202,6 +228,7 @@ def create_blueprint(
         except NotFound:
             return jsonify({"error": "not found"}), 404
         full = bug.to_full()
+        full["canNotify"] = bool(notifier is not None and bug.actor_email)
         full["audit"] = [a.to_dict() for a in store.list_audit(bug_id)]
         return jsonify(full)
 
@@ -234,9 +261,22 @@ def create_blueprint(
         if (new_status in contract.REASON_REQUIRED_FOR and new_status != old
                 and not note.strip()):
             return jsonify({"error": f"a reason is required to mark a report {new_status}"}), 400
-        changed_by = (
-            payload.get("changedBy") or payload.get("changed_by") or default_actor_email or "admin"
-        )[:200]
+        will_notify = (payload.get("notify") is True and new_status != old
+                       and new_status in ("resolved", "declined"))
+        if will_notify and not note.strip():
+            return jsonify({"error": "a note for the reporter is required to email them"}), 400
+        if actor_identity is not None:
+            # the checked identity, not the body's claim
+            closer_email, changed_by_name = _identity(request)
+            changed_by = (closer_email or default_actor_email or "admin")[:200]
+        else:
+            changed_by = (
+                payload.get("changedBy") or payload.get("changed_by") or default_actor_email or "admin"
+            )[:200]
+            changed_by_name = str(
+                payload.get("changedByName") or payload.get("changed_by_name") or ""
+            ).strip()[:200]
+            closer_email = changed_by if "@" in changed_by else ""
 
         old_status = old
         if new_status == old_status:
@@ -251,11 +291,53 @@ def create_blueprint(
             to_status=new_status,
             from_status=old_status,
             changed_by=changed_by,
+            changed_by_name=changed_by_name,
             note=note,
         ))
+        notified = None
+        if will_notify:
+            notified = _notify(bug, new_status, note, closer_email, changed_by, changed_by_name)
         full = contract.with_kind(bug.to_full())
         full["audit"] = [a.to_dict() for a in store.list_audit(bug_id)]
+        if notified is not None:
+            full["notified"] = notified
         return jsonify(full)
+
+    def _notify(bug, new_status, note, closer_email, changed_by, changed_by_name) -> dict:
+        """Email the reporter after the change is safely written. Never raises
+        and never undoes the change; the outcome is its own audit row."""
+        to = bug.actor_email
+        who = person_name(bug.actor_name, to) or "the reporter"
+        error = ""
+        if notifier is None:
+            error = "email is not set up on this server"
+        elif not to:
+            error = "this report has no address to email"
+        else:
+            try:
+                notifier(Notice(
+                    to_email=to, to_name=person_name(bug.actor_name, to),
+                    title=bug.title, note=note.strip(), status=new_status,
+                    bug_id=bug.id, filed_at=bug.added_at, page_url=bug.meta_url,
+                    app_url=app_url, closer_email=closer_email,
+                    closer_name=person_name(changed_by_name, closer_email),
+                ))
+            except Exception as e:
+                log.warning("bug notify: %s: %s", bug.id, e)
+                error = (str(e) or type(e).__name__)[:200]
+        label = f"{who} <{to}>" if to else who
+        store.append_audit(bug.id, AuditEntry(
+            changed_at=_now_iso(),
+            to_status=new_status,
+            from_status=new_status,
+            changed_by=changed_by,
+            changed_by_name=changed_by_name,
+            note=(f"email to {label} failed: {error}" if error else f"emailed {label}")[:500],
+        ))
+        out = {"ok": not error, "to": to}
+        if error:
+            out["error"] = error
+        return out
 
     # ----- GET /bugs/<id>/screenshot -----------------------------------
 

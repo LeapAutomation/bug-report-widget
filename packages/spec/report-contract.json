@@ -165,6 +165,15 @@
   ],
   "optionalDetailFields": ["transcript"],
 
+  "_optionalSummaryFields": [
+    "Added by backends 2.2.0, kept OUT of summaryFields so a reader built before",
+    "it still passes. `actorName` is the display name of whoever filed it (\"\"",
+    "when unknown); readers derive one from `actorEmail` when it is empty.",
+    "`canNotify` (detail read only) and `notified` (PATCH response only) are",
+    "likewise optional: see openapi.yaml."
+  ],
+  "optionalSummaryFields": ["actorName"],
+
   "_outOfScope": [
     "The canonical pattern's v2 sketch also proposes a free-form",
     "`context: object` and an `attachments[]` array. Deliberately NOT here:",
@@ -176,6 +185,8 @@
 
   "_auditFields": ["One row per transition. The actor is the authenticated caller, never the body."],
   "auditFields": ["changedAt", "changedBy", "fromStatus", "toStatus", "note"],
+  "_optionalAuditFields": ["Added by backends 2.2.0; older rows and the Node backend may not have it. \"\" when unknown."],
+  "optionalAuditFields": ["changedByName"],
 
   "_limits": ["Server-enforced, not client. Shared by every store."],
   "limits": {

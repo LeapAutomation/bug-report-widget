@@ -55,6 +55,9 @@ class BugRecord:
     meta_build_sha: str = ""
     screenshot: bool = False
     transcript: list[dict] | None = None
+    # Display name of whoever filed it ("" when unknown). Added in 2.2.0; a
+    # record on disk from before has no such key and loads with the default.
+    actor_name: str = ""
 
     def to_summary(self) -> dict:
         return {
@@ -64,6 +67,7 @@ class BugRecord:
             "status": self.status,
             "addedBy": self.added_by,
             "actorEmail": self.actor_email,
+            "actorName": self.actor_name,
             "addedAt": self.added_at,
             "screenshot": bool(self.screenshot),
         }
@@ -87,11 +91,13 @@ class AuditEntry:
     from_status: str | None = None
     changed_by: str = ""
     note: str = ""
+    changed_by_name: str = ""  # display name of changed_by; added in 2.2.0
 
     def to_dict(self) -> dict:
         return {
             "changedAt": self.changed_at,
             "changedBy": self.changed_by,
+            "changedByName": self.changed_by_name,
             "fromStatus": self.from_status,
             "toStatus": self.to_status,
             "note": self.note,
@@ -332,6 +338,7 @@ class FilesystemStore:
                 from_status=d.get("fromStatus") if "fromStatus" in d else d.get("from_status"),
                 changed_by=d.get("changedBy") or d.get("changed_by", ""),
                 note=d.get("note", ""),
+                changed_by_name=d.get("changedByName") or d.get("changed_by_name", ""),
             ))
         return out
 

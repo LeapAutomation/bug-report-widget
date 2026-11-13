@@ -55,6 +55,42 @@ Simulator first.
 - No option and no wire change. The button is inert while the form is open (it was already under the
   backdrop).
 
+## backends v2.2.0 — 2026-11-13
+
+From Chris Hamblin's report bug-20261112-124952: it was fixed, and Ken had to tell Chris by hand. Closing
+a report can now carry a note and email the person who filed it, and people are named throughout
+(bug-report-py 2.2.0; bug-report-node passes the new fields through). All additive.
+
+- **New: `create_blueprint(notifier=…, app_url=…)`.** `PATCH` takes `notify: true` (default false). On a
+  change to `resolved` or `declined` the server emails the reporter once: subject `Fixed: <title>` or
+  `Your bug report: <title> — not taken forward`; "Hi <first name>,", the note (URLs made links), signed with
+  the closer's name, "You reported this on <date> from <page>", the report id. Reply-To is the closer.
+  Reopening never emails. `notify` needs a non-empty `note` (400 otherwise, nothing changed). The status
+  change and its audit row are written first and a failed send never undoes them; a second audit row
+  (from = to = the new status) says `emailed Chris Hamblin <address>` or `email to … failed: <reason>`. The
+  response gains `notified: {ok, to, error?}`; no notifier configured, or a report with no address, is
+  `ok: false` with the reason (and the audit row). `GET /bugs/<id>` gains `canNotify` (a notifier is
+  configured and the report has an address). An app that passes no notifier never emails.
+- **New: `bug_report.email`** — `Notice`, `render(notice) -> (subject, html)` (everything escaped) and
+  `AcsNotifier`, an Azure Communication Services Email sender modelled on leap-daily-report's, behind
+  the `[email]` extra (`azure-communication-email`, `azure-identity`). `AcsNotifier.from_env()` reads
+  `ACS_ENDPOINT` (managed identity; `AZURE_CLIENT_ID` picks a user-assigned one) or `ACS_CONNECTION_STRING`,
+  `BUG_NOTIFY_SENDER` and `BUG_NOTIFY_DOMAINS`, and returns `None` when any is missing, so
+  `notifier=AcsNotifier.from_env()` just does not email when unset. Fails closed: an address outside
+  `BUG_NOTIFY_DOMAINS` is refused before anything is sent. SDK retries are off (`retry_total=0`) and the
+  wait on the send is bounded (60 s).
+- **New: people are named.** Reports gain `actorName` and audit rows `changedByName` (`""` when unknown;
+  the UI derives "Chris Hamblin" from `chris.hamblin@…` the same way `bug_report.person_name` does).
+  `actor_identity` may return `{"email": …, "name": …}` as well as a bare address, and now also stamps
+  `changedBy`/`changedByName` on a status change, replacing the request body's claim, which read "admin"
+  on every close. Without the hook the body's `actorName`/`changedBy`/`changedByName` are used, as before.
+  `BugRecord.actor_name` and `AuditEntry.changed_by_name` default to `""`, so existing constructors and
+  files on disk work unchanged.
+- **Node:** accepts and stores `actorName`/`changedByName` (Azure Tables: `ActorName`, `ChangedByName`),
+  serves `canNotify: false`, and ignores `notify` (no `notified`).
+- Spec: `openapi.yaml`, `types.ts`, `types.py`, and `report-contract.json` (`optionalSummaryFields`,
+  `optionalAuditFields`) updated; e2e contract tests cover the names on both backends.
+
 ## backends — bug-report-py 2.1.1, bug-report-node 1.1.1 — 2026-10-20
 
 - **Fix: `FilesystemStore` wrote a report in place, so a concurrent read saw half of it.** `put_bug`
