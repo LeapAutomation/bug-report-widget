@@ -17,9 +17,11 @@ import logging
 import os
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields as dc_fields
 from pathlib import Path
 from typing import Iterable, Protocol
+
+from . import contract
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +60,26 @@ class BugRecord:
     # Display name of whoever filed it ("" when unknown). Added in 2.2.0; a
     # record on disk from before has no such key and loads with the default.
     actor_name: str = ""
+    # Contract v3 (backends 3.0.0). A record written before has none of these
+    # and loads with the defaults: null, and no votes.
+    app: str | None = None        # stamped by the proxy from the caller's identity
+    kind: str | None = None       # stored; derived from `tags` when None
+    area: str | None = None       # triage
+    priority: str | None = None   # triage: now | next | later
+    owner: str | None = None      # triage: an email
+    parent_id: str | None = None  # triage: a report id (an epic holds its children)
+    duplicate_of: str | None = None  # triage: a report id
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "BugRecord":
+        """A record from its stored JSON. Keys this version does not know are
+        dropped (a newer writer's fields must not make the report unreadable);
+        keys it knows but the data lacks take their defaults."""
+        known = {f.name for f in dc_fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in known})
+
+    def effective_kind(self) -> str:
+        return contract.effective_kind(self.kind, self.tags)
 
     def to_summary(self) -> dict:
         return {
@@ -70,6 +92,14 @@ class BugRecord:
             "actorName": self.actor_name,
             "addedAt": self.added_at,
             "screenshot": bool(self.screenshot),
+            "kind": self.effective_kind(),
+            "app": self.app,
+            "product": contract.product_for_app(self.app),
+            "area": self.area,
+            "priority": self.priority,
+            "owner": self.owner,
+            "parentId": self.parent_id,
+            "duplicateOf": self.duplicate_of,
         }
 
     def to_full(self) -> dict:
@@ -104,6 +134,37 @@ class AuditEntry:
         }
 
 
+def matches(rec: BugRecord, *, status=None, since_iso="", app=None, kind=None,
+            area=None, priority=None) -> bool:
+    """The list filters, in one place so every store agrees on them."""
+    if rec.added_at < (since_iso or ""):
+        return False
+    if status and rec.status != status:
+        return False
+    if app and rec.app != app:
+        return False
+    if kind and rec.effective_kind() != kind:
+        return False
+    if area and rec.area != area:
+        return False
+    if priority and rec.priority != priority:
+        return False
+    return True
+
+
+def vote_time() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def normal_voter(voter: str) -> str:
+    """One vote per PERSON: addresses compare case-insensitively."""
+    return (voter or "").strip().lower()
+
+
+# Fields `update_fields` may set: the record's snake_case attributes.
+TRIAGE_ATTRS = ("area", "priority", "owner", "parent_id", "duplicate_of")
+
+
 # ---------------------------------------------------------------------------
 # Store protocol
 # ---------------------------------------------------------------------------
@@ -114,11 +175,33 @@ class Store(Protocol):
 
     def put_bug(self, bug: BugRecord, screenshot_png: bytes | None) -> None: ...
     def get_bug(self, bug_id: str) -> BugRecord: ...
-    def list_bugs(self, *, status: str | None, since_iso: str) -> Iterable[BugRecord]: ...
+    def list_bugs(self, *, status: str | None, since_iso: str, app: str | None = None,
+                  kind: str | None = None, area: str | None = None,
+                  priority: str | None = None) -> Iterable[BugRecord]: ...
     def update_status(self, bug_id: str, new_status: str) -> BugRecord: ...
+    # v3 (backends 3.0.0)
+    def update_fields(self, bug_id: str, changes: dict) -> BugRecord:
+        """Set triage attributes (``TRIAGE_ATTRS``: area, priority, owner,
+        parent_id, duplicate_of); a None value clears one."""
+        ...
+    def add_vote(self, bug_id: str, voter: str, at: str | None = None) -> bool:
+        """Record ``voter``'s vote (at ``at``, default now); False when they had already voted."""
+        ...
+    def remove_vote(self, bug_id: str, voter: str) -> bool: ...
+    def vote_counts(self, bug_ids: list[str]) -> dict[str, int]: ...
+    def list_votes(self, bug_id: str) -> list[dict]:
+        """``[{"voter", "at"}]``, oldest first."""
+        ...
     def append_audit(self, bug_id: str, entry: AuditEntry) -> None: ...
     def list_audit(self, bug_id: str) -> list[AuditEntry]: ...
     def get_screenshot(self, bug_id: str) -> bytes: ...
+
+
+def _apply_changes(rec: BugRecord, changes: dict) -> None:
+    for k, v in changes.items():
+        if k not in TRIAGE_ATTRS:
+            raise StoreError(f"not a triage field: {k}")
+        setattr(rec, k, v)
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +215,7 @@ class InMemoryStore:
         self._bugs: dict[str, BugRecord] = {}
         self._audits: dict[str, list[AuditEntry]] = {}
         self._screenshots: dict[str, bytes] = {}
+        self._votes: dict[str, dict[str, str]] = {}
 
     def put_bug(self, bug: BugRecord, screenshot_png: bytes | None) -> None:
         self._bugs[bug.id] = bug
@@ -145,18 +229,40 @@ class InMemoryStore:
         except KeyError as e:
             raise NotFound(bug_id) from e
 
-    def list_bugs(self, *, status, since_iso):
-        for b in self._bugs.values():
-            if b.added_at < since_iso:
-                continue
-            if status and b.status != status:
-                continue
-            yield b
+    def list_bugs(self, *, status, since_iso, app=None, kind=None, area=None, priority=None):
+        for b in list(self._bugs.values()):
+            if matches(b, status=status, since_iso=since_iso, app=app, kind=kind,
+                       area=area, priority=priority):
+                yield b
 
     def update_status(self, bug_id, new_status):
         b = self.get_bug(bug_id)
         b.status = new_status
         return b
+
+    def update_fields(self, bug_id, changes):
+        b = self.get_bug(bug_id)
+        _apply_changes(b, changes)
+        return b
+
+    def add_vote(self, bug_id, voter, at=None):
+        self.get_bug(bug_id)
+        v = normal_voter(voter)
+        votes = self._votes.setdefault(bug_id, {})
+        if v in votes:
+            return False
+        votes[v] = at or vote_time()
+        return True
+
+    def remove_vote(self, bug_id, voter):
+        self.get_bug(bug_id)
+        return self._votes.get(bug_id, {}).pop(normal_voter(voter), None) is not None
+
+    def vote_counts(self, bug_ids):
+        return {i: len(self._votes.get(i, {})) for i in bug_ids}
+
+    def list_votes(self, bug_id):
+        return [{"voter": v, "at": at} for v, at in self._votes.get(bug_id, {}).items()]
 
     def append_audit(self, bug_id, entry):
         self._audits.setdefault(bug_id, []).append(entry)
@@ -271,6 +377,9 @@ class FilesystemStore:
     def _shot_path(self, bug_id: str) -> Path:
         return self.root / f"{bug_id}.png"
 
+    def _votes_path(self, bug_id: str) -> Path:
+        return self.root / f"{bug_id}.votes.jsonl"
+
     def put_bug(self, bug, screenshot_png):
         if screenshot_png is not None:
             _atomic_write(self._shot_path(bug.id), screenshot_png)
@@ -287,9 +396,9 @@ class FilesystemStore:
             data = _read_json(p)
         except (OSError, json.JSONDecodeError) as e:
             raise StoreError(f"could not read {bug_id}") from e
-        return BugRecord(**data)
+        return BugRecord.from_dict(data)
 
-    def list_bugs(self, *, status, since_iso):
+    def list_bugs(self, *, status, since_iso, app=None, kind=None, area=None, priority=None):
         for p in self.root.glob("bug-*.json"):
             if p.name.endswith(".audit.jsonl"):
                 continue
@@ -297,18 +406,63 @@ class FilesystemStore:
                 data = _read_json(p)
             except (OSError, json.JSONDecodeError):
                 continue
-            rec = BugRecord(**data)
-            if rec.added_at < since_iso:
-                continue
-            if status and rec.status != status:
-                continue
-            yield rec
+            rec = BugRecord.from_dict(data)
+            if matches(rec, status=status, since_iso=since_iso, app=app, kind=kind,
+                       area=area, priority=priority):
+                yield rec
 
     def update_status(self, bug_id, new_status):
         rec = self.get_bug(bug_id)
         rec.status = new_status
         self.put_bug(rec, None)
         return rec
+
+    def update_fields(self, bug_id, changes):
+        rec = self.get_bug(bug_id)
+        _apply_changes(rec, changes)
+        self.put_bug(rec, None)
+        return rec
+
+    def _read_votes(self, bug_id) -> dict[str, str]:
+        p = self._votes_path(bug_id)
+        out: dict[str, str] = {}
+        if not p.exists():
+            return out
+        for ln in p.read_text().splitlines():
+            try:
+                d = json.loads(ln)
+                out[d["voter"]] = d.get("at", "")
+            except (json.JSONDecodeError, KeyError, TypeError):
+                continue
+        return out
+
+    def _write_votes(self, bug_id, votes: dict[str, str]) -> None:
+        body = "".join(json.dumps({"voter": v, "at": at}) + "\n" for v, at in votes.items())
+        _atomic_write(self._votes_path(bug_id), body.encode())
+
+    def add_vote(self, bug_id, voter, at=None):
+        self.get_bug(bug_id)
+        v = normal_voter(voter)
+        votes = self._read_votes(bug_id)
+        if v in votes:
+            return False
+        votes[v] = at or vote_time()
+        self._write_votes(bug_id, votes)
+        return True
+
+    def remove_vote(self, bug_id, voter):
+        self.get_bug(bug_id)
+        votes = self._read_votes(bug_id)
+        if votes.pop(normal_voter(voter), None) is None:
+            return False
+        self._write_votes(bug_id, votes)
+        return True
+
+    def vote_counts(self, bug_ids):
+        return {i: len(self._read_votes(i)) for i in bug_ids}
+
+    def list_votes(self, bug_id):
+        return [{"voter": v, "at": at} for v, at in self._read_votes(bug_id).items()]
 
     def append_audit(self, bug_id, entry):
         # An append, not a rewrite: it never truncates, and one short line is a

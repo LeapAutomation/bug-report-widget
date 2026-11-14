@@ -11,11 +11,19 @@ Wire it into any Flask app:
         is_admin=lambda req: req.headers.get("X-Admin") == "yes",  # your auth
     ), url_prefix="/api")
 
+``PostgresStore`` (``bug_report.pg``) is an optional extra and is not imported
+here: ``pip install "bug-report-py[postgres]"``, then
+``from bug_report.pg import PostgresStore``.
+
 Implements the contract in ../spec/openapi.yaml. Cross-stack contract tests
 in ../../e2e enforce that this and the Node backend stay honest.
 """
 
 from .blueprint import create_blueprint
+from .importer import import_reports
+from .proxy import create_proxy_blueprint
+from .trust import Caller, TrustedCallers, trusted_caller
+from . import identity
 from .email import AcsNotifier, Notice, render
 from .store import (
     Store,
@@ -23,6 +31,8 @@ from .store import (
     NotFound,
     InMemoryStore,
     FilesystemStore,
+    BugRecord,
+    AuditEntry,
 )
 from .models import (
     BUG_DETAILS_MAX,
@@ -34,7 +44,7 @@ from .models import (
     valid_bug_id,
 )
 
-__version__ = "1.0.0"
+__version__ = "3.0.0"
 
 from . import contract
 from .contract import (
@@ -47,10 +57,22 @@ from .contract import (
     is_valid_transition,
     is_closed,
     with_kind,
+    effective_kind,
+    PRODUCTS,
+    APP_PRODUCTS,
+    PRIORITIES,
+    TRIAGE_FIELDS,
+    product_for_app,
 )
 
 __all__ = [
     "create_blueprint",
+    "create_proxy_blueprint",
+    "import_reports",
+    "trusted_caller",
+    "TrustedCallers",
+    "Caller",
+    "identity",
     "AcsNotifier",
     "Notice",
     "render",
@@ -69,6 +91,8 @@ __all__ = [
     "NotFound",
     "InMemoryStore",
     "FilesystemStore",
+    "BugRecord",
+    "AuditEntry",
     "BUG_DETAILS_MAX",
     "BUG_SCREENSHOT_MAX",
     "BUG_STATUSES",

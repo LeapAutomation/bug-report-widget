@@ -6,7 +6,7 @@ If the two backends ever drift (one returns a different status code, one orders 
 
 ## What runs
 
-Each test runs twice — once against the Python backend, once against the Node backend. The fixture boots both as subprocesses on random ports and yields their base URLs.
+Each test runs three times — against the Python backend on files, the Python backend on PostgreSQL, and the Node backend. The fixture boots each as a subprocess on a random port and yields its base URL. The Postgres one needs a real server (`BUG_REPORT_PG_DSN`, or Homebrew's `postgresql@16`, started for you); without one it skips, and under `CI=true` it fails. `test_v3.py` covers contract v3 (triage fields, duplicates, votes, filters) on the same three, with servers that take the caller and app from test headers.
 
 ```bash
 cd e2e

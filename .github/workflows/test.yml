@@ -15,6 +15,22 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # A real PostgreSQL for PostgresStore, the blueprint suite and the e2e suite. The tests FAIL (not skip)
+    # when it is missing under CI=true, which GitHub Actions sets.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      BUG_REPORT_PG_DSN: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

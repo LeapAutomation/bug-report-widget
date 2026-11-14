@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Bug Report API
-  version: 1.0.0
+  version: 3.0.0
   description: |
     The API contract every bug-report backend must honor. The widget
     (packages/widget) and the CLI (packages/cli) speak this protocol;
@@ -46,6 +46,19 @@ paths:
                   id:
                     type: string
                     example: bug-20260516-181523-a3b91f2
+                  app:
+                    type: string
+                    nullable: true
+                    description: |
+                      The app the report was filed under (backends 3.0.0): stamped
+                      from the caller's identity, never from the body. Null when
+                      the server does not stamp one.
+                  appIgnored:
+                    type: string
+                    description: |
+                      Only when a trusted app's `X-Leap-App` header disagreed with
+                      its token: the claim that was ignored. (`X-Leap-App-Used` /
+                      `X-Leap-App-Ignored` response headers say the same.)
         "400":
           $ref: "#/components/responses/BadRequest"
         "413":
@@ -70,6 +83,26 @@ paths:
             type: integer
             minimum: 1
             default: 30
+        - in: query
+          name: app
+          description: Only reports filed under this app (backends 3.0.0).
+          schema: { type: string }
+        - in: query
+          name: kind
+          description: Only this kind, stored or derived from the tags (3.0.0).
+          schema:
+            type: string
+            enum: [bug, feature]
+        - in: query
+          name: area
+          description: Only this area (3.0.0).
+          schema: { type: string }
+        - in: query
+          name: priority
+          description: Only this priority (3.0.0).
+          schema:
+            type: string
+            enum: [now, next, later]
       responses:
         "200":
           description: A list of bugs sorted newest-first
@@ -104,8 +137,19 @@ paths:
           $ref: "#/components/responses/NotFound"
 
     patch:
-      summary: Transition status (admin)
+      summary: Transition status and/or set triage fields (admin)
       description: |
+        Backends 3.0.0: `status` is optional when a triage field (`area`,
+        `priority`, `owner`, `parentId`, `duplicateOf`) is sent. A null or
+        empty value clears a field; a value equal to the current one is a
+        no-op. Each change writes an audit row (from = to = the current
+        status) whose `note` says what changed, e.g. `area: none -> Cutter`.
+        `duplicateOf` also DECLINES the report, with the status row's note
+        `duplicate of <id>` (409 when the lifecycle forbids declining, 400 when
+        `status` is given and is not `declined`). `parentId` must not make a
+        cycle. 404 when a referenced report does not exist.
+
+
         Implementations MUST write an audit row on every successful
         transition and MUST be no-op when status == current status.
 
@@ -124,10 +168,27 @@ paths:
           application/json:
             schema:
               type: object
-              required: [status]
               properties:
                 status:
                   $ref: "#/components/schemas/Status"
+                area:
+                  type: string
+                  nullable: true
+                  maxLength: 100
+                priority:
+                  type: string
+                  nullable: true
+                  enum: [now, next, later]
+                owner:
+                  type: string
+                  nullable: true
+                  description: An email address.
+                parentId:
+                  type: string
+                  nullable: true
+                duplicateOf:
+                  type: string
+                  nullable: true
                 note:
                   type: string
                   maxLength: 500
@@ -150,6 +211,43 @@ paths:
                 $ref: "#/components/schemas/Bug"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /bugs/{id}/vote:
+    parameters:
+      - $ref: "#/components/parameters/BugId"
+    post:
+      summary: Vote for a report (any signed-in caller; backends 3.0.0)
+      description: One vote per person; voting twice is a no-op. 401 when nobody is signed in.
+      operationId: voteBug
+      responses:
+        "200":
+          description: The report's vote count
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Voted" }
+        "401":
+          description: Nobody is signed in
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      summary: Take your vote back (backends 3.0.0)
+      operationId: unvoteBug
+      responses:
+        "200":
+          description: The report's vote count
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Voted" }
+        "401":
+          description: Nobody is signed in
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -273,6 +371,10 @@ components:
             was never answered. Servers MAY ignore it — the reference
             backends do, so an app on them must not enable `idempotentSubmit`
             unless its own server dedupes.
+        kind:
+          type: string
+          enum: [bug, feature]
+          description: Optional (backends 3.0.0). Stored; derived from `tags` when absent.
         transcript:
           type: array
           items:
@@ -316,7 +418,7 @@ components:
         kind:
           type: string
           enum: [bug, feature]
-          description: Derived from the tags (report-contract.json `kinds`, `kindTags`); a feature request is tagged `feature`.
+          description: Stored since 3.0.0; derived from the tags (report-contract.json `kinds`, `kindTags`) when the filer did not say.
         addedBy: { type: string }
         actorEmail: { type: string }
         actorName:
@@ -326,6 +428,41 @@ components:
         screenshot:
           type: boolean
           description: True iff a screenshot was stored.
+        app:
+          type: string
+          nullable: true
+          enum: [stoppages, fleet, report, placements, sealviewer, leaphq]
+          description: Stamped from the caller's identity (backends 3.0.0); null on a v2 record.
+        product:
+          type: string
+          nullable: true
+          enum: [PikPak, Seal, Placement, Internal]
+          description: Derived from `app` by report-contract.json `appProducts`; not stored.
+        area:
+          type: string
+          nullable: true
+          description: Triage field (3.0.0).
+        priority:
+          type: string
+          nullable: true
+          enum: [now, next, later]
+          description: Triage field (3.0.0).
+        owner:
+          type: string
+          nullable: true
+          description: Triage field (3.0.0), an email.
+        parentId:
+          type: string
+          nullable: true
+          description: Triage field (3.0.0), a report id.
+        duplicateOf:
+          type: string
+          nullable: true
+          description: Triage field (3.0.0), a report id; setting it declines the report.
+        votes:
+          type: integer
+          minimum: 0
+          description: Count of people who voted (3.0.0); 0 on a v2 record.
 
     Bug:
       allOf:
@@ -373,6 +510,15 @@ components:
             - type: "null"
         toStatus: { $ref: "#/components/schemas/Status" }
         note: { type: string }
+
+    Voted:
+      type: object
+      required: [votes, voted]
+      properties:
+        votes: { type: integer, minimum: 0 }
+        voted:
+          type: boolean
+          description: Whether the caller's vote now stands.
 
     Error:
       type: object

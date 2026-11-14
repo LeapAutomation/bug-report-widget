@@ -56,6 +56,12 @@ def test_every_field_the_server_sends_is_in_the_spec(tmp_path):
     c = _client(tmp_path)
     bid = c.post("/api/bugs", json={"title": "t", "details": "d", "metaUrl": "https://x/"}).get_json()["id"]
     c.patch(f"/api/bugs/{bid}", json={"status": "triaged", "note": ""})
+    other = c.post("/api/bugs", json={"details": "other"}).get_json()["id"]
+    triaged = c.patch(f"/api/bugs/{bid}", json={"area": "Belt", "priority": "now", "owner": "a@example.com",
+                                                "parentId": other}).get_json()
+    voted = c.post(f"/api/bugs/{bid}/vote").get_json()
+    dup = c.patch(f"/api/bugs/{other}", json={"duplicateOf": bid}).get_json()
+    created = c.post("/api/bugs", json={"details": "again"}).get_json()
     closed = c.patch(f"/api/bugs/{bid}", json={"status": "resolved", "note": "done", "notify": True}).get_json()
     detail = c.get(f"/api/bugs/{bid}").get_json()
     summary = c.get("/api/bugs?days=1").get_json()["bugs"][0]
@@ -71,3 +77,49 @@ def test_every_field_the_server_sends_is_in_the_spec(tmp_path):
     for row in closed["audit"]:
         assert set(row) - audit_spec == set()
     assert set(closed["notified"]) <= {"ok", "to", "error"}
+    # v3: the triage fields, the duplicate decline and the new response shapes
+    for resp in (triaged, dup):
+        assert set(resp) - bug_spec == set()
+        for row in resp["audit"]:
+            assert set(row) - audit_spec == set()
+    assert {"area", "priority", "owner", "parentId", "duplicateOf", "votes", "app", "product", "kind"} <= set(summary)
+    assert set(voted) == _schema_properties("Voted")
+    assert set(created) <= _schema_properties_of_created()
+
+
+def _schema_properties_of_created() -> set[str]:
+    """The 201 body's properties, read from the createBug response (an inline schema)."""
+    text = SPEC.read_text()
+    block = text[text.index("operationId: createBug"):text.index('"400":')]
+    after = block[block.index('"201":'):]
+    return set(re.findall(r"^ {18}(\w+):\s*$", after, re.M))
+
+
+def test_every_contract_summary_field_is_a_bugsummary_property_in_the_spec():
+    import json
+    contract_json = json.loads((SPEC.parent / "report-contract.json").read_text())
+    assert set(contract_json["summaryFields"]) - _schema_properties("BugSummary") == set()
+
+
+def test_the_vote_route_the_list_filters_and_the_patch_fields_are_in_the_spec():
+    text = SPEC.read_text()
+    assert "/bugs/{id}/vote:" in text and "operationId: voteBug" in text and "operationId: unvoteBug" in text
+    for filt in ("app", "kind", "area", "priority"):
+        assert f"name: {filt}\n" in text
+    patch = text[text.index("operationId: patchBug"):text.index("/bugs/{id}/vote:")]
+    for field in ("area:", "priority:", "owner:", "parentId:", "duplicateOf:"):
+        assert field in patch
+    assert "required: [status]" not in patch
+
+
+def test_types_py_and_types_ts_name_every_v3_summary_field():
+    import json
+    fields = json.loads((SPEC.parent / "report-contract.json").read_text())["summaryFields"]
+    # inside BugSummary only: BugPatch and BugCreate name some of the same fields
+    py = (SPEC.parent / "types.py").read_text()
+    py = py[py.index("class BugSummary"):py.index("class AuditEntry")]
+    ts = (SPEC.parent / "types.ts").read_text()
+    ts = ts[ts.index("export interface BugSummary"):ts.index("export interface AuditEntry")]
+    for f in fields:
+        assert re.search(rf"^\s+{f}\??:", ts, re.M), f"types.ts BugSummary lacks {f}"
+        assert re.search(rf"^\s+{f}:", py, re.M), f"types.py BugSummary lacks {f}"

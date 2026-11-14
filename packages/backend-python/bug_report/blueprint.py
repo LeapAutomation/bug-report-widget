@@ -65,6 +65,8 @@ def create_blueprint(
     is_admin: Callable | None = None,
     default_actor_email: str = "",
     actor_identity: Callable | None = None,
+    app_stamp: Callable | None = None,
+    guard: Callable | None = None,
     build_sha: str | Callable[[], str] = "",
     url_prefix: str = "/bugs",
     notifier: Callable | None = None,
@@ -87,6 +89,15 @@ def create_blueprint(
                   payload's value is used, as before. Added in 2.1.0. The
                   same identity stamps ``changedBy``/``changedByName`` on a
                   status change (2.2.0), replacing the request body's claim.
+        app_stamp: ``(request) -> str | None`` giving the app a new report is
+                  filed under (contract v3 ``app``). The caller cannot set it:
+                  the request body's ``app`` is never read here, only by a
+                  hook that has checked who is asking (``TrustedCallers``).
+                  Unknown apps (not in ``contract.APP_PRODUCTS``) are dropped.
+                  Without the hook ``app`` stays null. Added in 3.0.0.
+        guard: ``(request) -> None | (status, message)`` run before every
+                  route; a tuple refuses the request (``TrustedCallers.guard``:
+                  a bad or untrusted bearer token). Added in 3.0.0.
         build_sha: String or zero-arg callable returning the current build SHA.
                    Stamped on each report. Empty string means "unknown".
         url_prefix: Mount path within the blueprint. Outer app typically
@@ -101,6 +112,27 @@ def create_blueprint(
         is_admin = lambda req: True  # noqa: E731 — single-user default
 
     bp = Blueprint("bug_report", __name__)
+
+    @bp.before_request
+    def _guard():
+        if guard is None:
+            return None
+        refused = guard(request)
+        if refused:
+            status, message = refused
+            return jsonify({"error": message}), status
+        return None
+
+    @bp.after_request
+    def _say_which_app_won(resp):
+        # Set by TrustedCallers: the app the token says, and the one the caller
+        # claimed in X-Leap-App when the two disagreed (the claim lost).
+        caller = request.environ.get("bug_report.caller")
+        if caller is not None and getattr(caller, "app", None):
+            resp.headers["X-Leap-App-Used"] = caller.app
+            if getattr(caller, "app_ignored", None):
+                resp.headers["X-Leap-App-Ignored"] = caller.app_ignored
+        return resp
 
     def _resolve_build_sha() -> str:
         if callable(build_sha):
@@ -155,6 +187,16 @@ def create_blueprint(
         if added_by == "agent" and "agent-self-report" not in tags:
             tags.append("agent-self-report")
 
+        kind = payload.get("kind")
+        kind = kind if kind in contract.KINDS else contract.kind_from_tags(tags)
+        app = None
+        if app_stamp is not None:
+            try:
+                app = app_stamp(request)
+            except Exception:
+                app = None
+            app = app if app in contract.APP_PRODUCTS else None
+
         shot_bytes: bytes | None = None
         raw = payload.get("screenshot")
         if raw and isinstance(raw, str):
@@ -187,6 +229,8 @@ def create_blueprint(
             meta_user_agent=(payload.get("metaUserAgent") or payload.get("meta_user_agent") or "")[:300],
             meta_build_sha=(payload.get("metaBuildSha") or payload.get("meta_build_sha") or _resolve_build_sha())[:40],
             transcript=transcript,
+            app=app,
+            kind=kind,
         )
         store.put_bug(bug, shot_bytes)
         store.append_audit(bug.id, AuditEntry(
@@ -197,7 +241,11 @@ def create_blueprint(
             changed_by_name=actor_name,
             note="filed",
         ))
-        return jsonify({"id": bug.id}), 201
+        out = {"id": bug.id, "app": app}
+        caller = request.environ.get("bug_report.caller")
+        if getattr(caller, "app_ignored", None):
+            out["appIgnored"] = caller.app_ignored
+        return jsonify(out), 201
 
     # ----- GET /bugs ----------------------------------------------------
 
@@ -212,10 +260,31 @@ def create_blueprint(
             days = max(1, min(365, int(request.args.get("days") or 30)))
         except ValueError:
             return jsonify({"error": "days must be an integer"}), 400
-        rows = [contract.with_kind(b.to_summary())
-                for b in store.list_bugs(status=status_filter, since_iso=_since_iso(days))]
+        kind_filter = (request.args.get("kind") or "").strip() or None
+        if kind_filter and kind_filter not in contract.KINDS:
+            return jsonify({"error": f"kind must be one of {contract.KINDS}"}), 400
+        priority_filter = (request.args.get("priority") or "").strip() or None
+        if priority_filter and priority_filter not in contract.PRIORITIES:
+            return jsonify({"error": f"priority must be one of {contract.PRIORITIES}"}), 400
+        bugs = list(store.list_bugs(
+            status=status_filter, since_iso=_since_iso(days),
+            app=(request.args.get("app") or "").strip() or None, kind=kind_filter,
+            area=(request.args.get("area") or "").strip() or None, priority=priority_filter))
+        counts = _vote_counts([b.id for b in bugs])
+        rows = [contract.with_kind({**b.to_summary(), "votes": counts.get(b.id, 0)}) for b in bugs]
         rows.sort(key=lambda r: r["addedAt"], reverse=True)
         return jsonify({"bugs": rows})
+
+    def _vote_counts(ids):
+        """Votes per report; a store that predates votes counts none."""
+        counter = getattr(store, "vote_counts", None)
+        return counter(ids) if counter and ids else {}
+
+    def _detail(bug) -> dict:
+        full = contract.with_kind(bug.to_full())
+        full["votes"] = _vote_counts([bug.id]).get(bug.id, 0)
+        full["audit"] = [a.to_dict() for a in store.list_audit(bug.id)]
+        return full
 
     # ----- GET /bugs/<id> ----------------------------------------------
 
@@ -227,12 +296,62 @@ def create_blueprint(
             bug = store.get_bug(bug_id)
         except NotFound:
             return jsonify({"error": "not found"}), 404
-        full = bug.to_full()
+        full = _detail(bug)
         full["canNotify"] = bool(notifier is not None and bug.actor_email)
-        full["audit"] = [a.to_dict() for a in store.list_audit(bug_id)]
         return jsonify(full)
 
     # ----- PATCH /bugs/<id> --------------------------------------------
+
+    def _triage_changes(bug, payload):
+        """Validate the triage fields in a PATCH body and return
+        ``({attr: new value}, error)``: only fields that actually change, and a
+        ``(status, message)`` refusal for the first bad one. A null or empty
+        value clears a field."""
+        changes: dict = {}
+        for wire in contract.TRIAGE_FIELDS:
+            if wire not in payload:
+                continue
+            raw = payload[wire]
+            val = None if raw is None else str(raw).strip()
+            val = val or None
+            attr = {"parentId": "parent_id", "duplicateOf": "duplicate_of"}.get(wire, wire)
+            if wire == "area" and val and len(val) > 100:
+                return None, (400, "area is at most 100 characters")
+            if wire == "priority" and val and val not in contract.PRIORITIES:
+                return None, (400, f"priority must be one of {contract.PRIORITIES}")
+            if wire == "owner" and val and ("@" not in val or len(val) > 200):
+                return None, (400, "owner must be an email address")
+            if wire in ("parentId", "duplicateOf") and val:
+                if not valid_bug_id(val):
+                    return None, (400, f"{wire} must be a report id")
+                if val == bug.id:
+                    return None, (400, f"{wire} cannot be the report itself")
+                try:
+                    store.get_bug(val)
+                except NotFound:
+                    return None, (404, f"{wire}: no such report")
+            if wire == "parentId" and val:
+                # an epic holds its children: a parent chain must never loop back
+                seen, up = set(), val
+                while up and up not in seen:
+                    if up == bug.id:
+                        return None, (400, "parentId would make a cycle")
+                    seen.add(up)
+                    try:
+                        up = store.get_bug(up).parent_id
+                    except NotFound:
+                        break
+            if getattr(bug, attr) != val:
+                changes[attr] = val
+        return changes, None
+
+    _WIRE = {"parent_id": "parentId", "duplicate_of": "duplicateOf"}
+
+    def _describe(bug, changes) -> str:
+        shown = lambda v: "none" if v is None else str(v)  # noqa: E731
+        return "; ".join(
+            f"{_WIRE.get(a, a)}: {shown(getattr(bug, a))} -> {shown(v)}" for a, v in changes.items()
+        )[:500]
 
     @bp.route(f"{url_prefix}/<bug_id>", methods=["PATCH"])
     def api_patch(bug_id: str):
@@ -247,10 +366,24 @@ def create_blueprint(
 
         payload = request.get_json(silent=True) or {}
         new_status = (payload.get("status") or "").strip()
-        if new_status not in BUG_STATUSES:
+        has_triage = any(f in payload for f in contract.TRIAGE_FIELDS)
+        if not (has_triage and not new_status) and new_status not in BUG_STATUSES:
             return jsonify({"error": f"status must be one of {BUG_STATUSES}"}), 400
         note = (payload.get("note") or "")[:500]
         old = bug.status
+        changes, refused = _triage_changes(bug, payload)
+        if refused:
+            return jsonify({"error": refused[1]}), refused[0]
+        # A duplicate is a decline: setting `duplicateOf` closes the report with
+        # the note "duplicate of <id>". (Clearing it changes nothing else.)
+        dup = changes.get("duplicate_of")
+        if dup:
+            if new_status and new_status != "declined":
+                return jsonify({"error": "duplicateOf declines the report; status must be declined or omitted"}), 400
+            new_status = "declined"
+            note = f"duplicate of {dup}" + (f": {note}" if note.strip() else "")
+        elif not new_status:
+            new_status = old
         # The lifecycle gate. This route used to check only that the
         # status was a member of the enum, which let `open -> resolved`
         # through here and 409 in a sibling app reading the same queue.
@@ -279,26 +412,39 @@ def create_blueprint(
             closer_email = changed_by if "@" in changed_by else ""
 
         old_status = old
-        if new_status == old_status:
+        if new_status == old_status and not changes:
             # No-op: don't write a meaningless audit row.
-            full = contract.with_kind(bug.to_full())
-            full["audit"] = [a.to_dict() for a in store.list_audit(bug_id)]
-            return jsonify(full)
+            return jsonify(_detail(bug))
 
-        bug = store.update_status(bug_id, new_status)
-        store.append_audit(bug_id, AuditEntry(
-            changed_at=_now_iso(),
-            to_status=new_status,
-            from_status=old_status,
-            changed_by=changed_by,
-            changed_by_name=changed_by_name,
-            note=note,
-        ))
+        # What the audit row for the fields says, worked out against the record as it is NOW.
+        decline_row = new_status != old_status
+        described = _describe(bug, {a: v for a, v in changes.items()
+                                    if not (decline_row and a == "duplicate_of")})
+        if changes:
+            bug = store.update_fields(bug_id, changes)
+        if decline_row:
+            bug = store.update_status(bug_id, new_status)
+            store.append_audit(bug_id, AuditEntry(
+                changed_at=_now_iso(),
+                to_status=new_status,
+                from_status=old_status,
+                changed_by=changed_by,
+                changed_by_name=changed_by_name,
+                note=note,
+            ))
+        if described:
+            store.append_audit(bug_id, AuditEntry(
+                changed_at=_now_iso(),
+                to_status=bug.status,
+                from_status=bug.status,
+                changed_by=changed_by,
+                changed_by_name=changed_by_name,
+                note=described,
+            ))
         notified = None
         if will_notify:
             notified = _notify(bug, new_status, note, closer_email, changed_by, changed_by_name)
-        full = contract.with_kind(bug.to_full())
-        full["audit"] = [a.to_dict() for a in store.list_audit(bug_id)]
+        full = _detail(bug)
         if notified is not None:
             full["notified"] = notified
         return jsonify(full)
@@ -338,6 +484,39 @@ def create_blueprint(
         if error:
             out["error"] = error
         return out
+
+    # ----- POST / DELETE /bugs/<id>/vote (3.0.0) -----------------------
+
+    def _voter(req) -> str:
+        """Who is voting: the checked identity when the app gave one, else (as
+        for filing) the request's own claim. "" means nobody is signed in."""
+        if actor_identity is not None:
+            return _identity(req)[0]
+        body = req.get_json(silent=True) if req.is_json else None
+        claim = (body or {}).get("actorEmail") or req.args.get("actorEmail") or default_actor_email
+        return str(claim or "").strip()[:200]
+
+    def _vote(bug_id: str, adding: bool):
+        if not valid_bug_id(bug_id):
+            return jsonify({"error": "invalid id"}), 400
+        voter = _voter(request)
+        if not voter:
+            return jsonify({"error": "sign in to vote"}), 401
+        if not hasattr(store, "add_vote"):
+            return jsonify({"error": "this store does not keep votes"}), 501
+        try:
+            (store.add_vote if adding else store.remove_vote)(bug_id, voter)
+        except NotFound:
+            return jsonify({"error": "not found"}), 404
+        return jsonify({"votes": store.vote_counts([bug_id]).get(bug_id, 0), "voted": adding})
+
+    @bp.route(f"{url_prefix}/<bug_id>/vote", methods=["POST"])
+    def api_vote(bug_id: str):
+        return _vote(bug_id, True)
+
+    @bp.route(f"{url_prefix}/<bug_id>/vote", methods=["DELETE"])
+    def api_unvote(bug_id: str):
+        return _vote(bug_id, False)
 
     # ----- GET /bugs/<id>/screenshot -----------------------------------
 
