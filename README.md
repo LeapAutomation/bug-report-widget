@@ -49,6 +49,10 @@ gh search code --owner LeapAutomation BugReportConfig
 
 If you build something new and want bug reporting in an hour, see [docs/integrating.md](docs/integrating.md).
 
+## Where this is going
+
+Every Leap app's reports are moving to one store on Postgres, triaged in one place: [docs/CENTRAL-STORE.md](docs/CENTRAL-STORE.md) (design, 2026-11-14; not built).
+
 ## Quick start
 
 ### Frontend (any stack)
