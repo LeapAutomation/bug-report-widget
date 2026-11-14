@@ -111,7 +111,11 @@ Every route (POST, list, detail, PATCH, vote, screenshot) is forwarded with its 
 and the service's status, body, content type and `Location` come back unchanged (a 302 to a signed screenshot URL is
 not followed). Each forwarded request carries `Authorization: Bearer <token_provider()>`, `X-Leap-Actor-Email` and
 `X-Leap-Actor-Name` (percent-encoded) from `person_provider()`, and `X-Leap-App: <app>`; the browser's own
-`Authorization` and `X-Leap-*` headers are dropped. A `..` path segment is refused (400). A service that cannot be reached is a 502, and a token or identity that cannot be
+`Authorization` and `X-Leap-*` headers are dropped. A 401/403 the service marks as a refusal of the APP (`X-Leap-Trust-Refusal`, set by `guard=`; 3.0.1) comes back as a
+502 `the reports service refused this app`, the real status and body going to the log: a client that reads a 401 as "your
+sign-in failed" (a seal laptop's outbox) must never be told that about a setup mistake. The blueprint's own 403 (not an admin)
+and 401 (sign in to vote) pass through. A list with no `app` query is asked for as `app=<this app>` (3.0.1); an explicit `app`
+passes through. A `..` path segment is refused (400). A service that cannot be reached is a 502, and a token or identity that cannot be
 produced is a 502 with nothing sent; the 502 bodies are generic (the reason goes to the log, not the browser). Standard library only (urllib).
 
 ## The service side: who is calling (3.0.0)

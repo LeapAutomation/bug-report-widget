@@ -15,7 +15,10 @@ its method, query, body and content type, and the service's status code, body
 and content type come back unchanged. Each forwarded request carries
 ``Authorization: Bearer <token_provider()>``, ``X-Leap-Actor-Email`` /
 ``X-Leap-Actor-Name`` (percent-encoded; the service decodes) from
-``person_provider()``, and ``X-Leap-App: <app>``. Any ``Authorization`` or
+``person_provider()``, and ``X-Leap-App: <app>``. A list with no ``app`` query is
+asked for this app's own reports. A 401/403 the service marks as a refusal of the
+APP (``X-Leap-Trust-Refusal``) comes back as a 502; its other 401/403 (not an
+admin, sign in to vote) pass through. Any ``Authorization`` or
 ``X-Leap-*`` header the browser sent is dropped: the app's own identity, not
 the page's claim, is what the service looks at. Standard library only.
 """
@@ -29,6 +32,8 @@ from typing import Callable
 from urllib.parse import quote
 
 from flask import Blueprint, Response, request
+
+from .trust import TRUST_REFUSAL_HEADER
 
 log = logging.getLogger(__name__)
 
@@ -68,8 +73,13 @@ def create_proxy_blueprint(
         if any(seg in ("..", ".") or "\\" in seg for seg in rest.split("/")):
             return _err(400, "invalid path")
         url = base + ("/" + rest if rest else "")
-        if request.query_string:
-            url += "?" + request.query_string.decode("latin-1")
+        query = request.query_string.decode("latin-1")
+        # The list is this app's own reports unless the caller says otherwise (3.0.1): the open count and
+        # the queue must not show every app's, which is what the service gives a trusted app with no filter.
+        if request.method == "GET" and not rest and "app" not in request.args:
+            query = (query + "&" if query else "") + "app=" + quote(app, safe="")
+        if query:
+            url += "?" + query
         try:
             person = person_provider() or {}
             headers = {h: request.headers[h] for h in _FORWARD if h in request.headers}
@@ -97,6 +107,11 @@ def create_proxy_blueprint(
             return _err(502, "the reports service is not reachable")
 
     def _relay(status, body, upstream_headers):
+        if status in (401, 403) and upstream_headers.get(TRUST_REFUSAL_HEADER):
+            # The service refused THIS APP (a setup mistake), not the person. A 401 here would read, to a
+            # client that treats 401 as "your sign-in failed" (a seal laptop's outbox), as the person's.
+            log.warning("reports proxy (%s): the service refused this app: %s %s", app, status, body[:300])
+            return _err(502, "the reports service refused this app")
         resp = Response(body, status=status)
         for h in _BACK:
             v = upstream_headers.get(h)

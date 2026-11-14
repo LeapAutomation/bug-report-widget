@@ -34,6 +34,10 @@ from urllib.parse import unquote
 #: where the resolved caller is cached for the life of one request
 ENVIRON_KEY = "bug_report.caller"
 
+#: set on a response the ``guard`` refused (no, bad or untrusted app token), so a proxy can tell "the app
+#: was refused" from the blueprint's own 401/403 about the person (3.0.1)
+TRUST_REFUSAL_HEADER = "X-Leap-Trust-Refusal"
+
 
 @dataclass
 class Caller:

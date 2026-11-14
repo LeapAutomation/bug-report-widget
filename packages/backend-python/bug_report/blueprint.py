@@ -24,7 +24,7 @@ from .models import (
     screenshot_content_type,
     valid_bug_id,
 )
-from .trust import ENVIRON_KEY
+from .trust import ENVIRON_KEY, TRUST_REFUSAL_HEADER
 from .store import (
     AuditEntry,
     BugRecord,
@@ -124,7 +124,12 @@ def create_blueprint(
         refused = guard(request)
         if refused:
             status, message = refused
-            return jsonify({"error": message}), status
+            resp = jsonify({"error": message})
+            resp.status_code = status
+            # Said apart from the blueprint's own 401/403 (sign in to vote, not an admin): a proxy turns
+            # THIS one into a 502, because the app was refused, not the person (3.0.1).
+            resp.headers[TRUST_REFUSAL_HEADER] = "1"
+            return resp
         return None
 
     @bp.after_request
