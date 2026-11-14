@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, field, fields as dc_fields
@@ -162,7 +163,7 @@ def normal_voter(voter: str) -> str:
 
 
 # Fields `update_fields` may set: the record's snake_case attributes.
-TRIAGE_ATTRS = ("area", "priority", "owner", "parent_id", "duplicate_of")
+TRIAGE_ATTRS = tuple(contract.TRIAGE_WIRE_TO_ATTR.values())
 
 
 # ---------------------------------------------------------------------------
@@ -184,6 +185,12 @@ class Store(Protocol):
         """Set triage attributes (``TRIAGE_ATTRS``: area, priority, owner,
         parent_id, duplicate_of); a None value clears one."""
         ...
+    def update_bug(self, bug_id: str, *, status: str | None = None,
+                   changes: dict | None = None) -> BugRecord:
+        """Set the status and/or triage attributes ATOMICALLY: read, change and
+        write as one step, so two concurrent PATCHes of different fields both
+        land (no lost update). What the PATCH route calls."""
+        ...
     def add_vote(self, bug_id: str, voter: str, at: str | None = None) -> bool:
         """Record ``voter``'s vote (at ``at``, default now); False when they had already voted."""
         ...
@@ -197,11 +204,13 @@ class Store(Protocol):
     def get_screenshot(self, bug_id: str) -> bytes: ...
 
 
-def _apply_changes(rec: BugRecord, changes: dict) -> None:
+def apply_changes(rec: BugRecord, changes: dict, status: str | None = None) -> None:
     for k, v in changes.items():
         if k not in TRIAGE_ATTRS:
             raise StoreError(f"not a triage field: {k}")
         setattr(rec, k, v)
+    if status is not None:
+        rec.status = status
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +251,12 @@ class InMemoryStore:
 
     def update_fields(self, bug_id, changes):
         b = self.get_bug(bug_id)
-        _apply_changes(b, changes)
+        apply_changes(b, changes)
+        return b
+
+    def update_bug(self, bug_id, *, status=None, changes=None):
+        b = self.get_bug(bug_id)
+        apply_changes(b, changes or {}, status)
         return b
 
     def add_vote(self, bug_id, voter, at=None):
@@ -357,6 +371,16 @@ class FilesystemStore:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self._sweep_stale_temps()
+        self._locks: dict[str, threading.Lock] = {}
+        self._locks_guard = threading.Lock()
+
+    def _lock(self, bug_id: str) -> threading.Lock:
+        """One lock per report: a read-modify-write of its record (status, triage
+        fields, votes) must not interleave with another, or the later write
+        puts back the older value of whatever the other one changed. (One
+        process; across processes each write is still atomic, as before.)"""
+        with self._locks_guard:
+            return self._locks.setdefault(bug_id, threading.Lock())
 
     def _sweep_stale_temps(self) -> None:
         """A crash between creating a temp file and the replace leaves it behind."""
@@ -412,16 +436,17 @@ class FilesystemStore:
                 yield rec
 
     def update_status(self, bug_id, new_status):
-        rec = self.get_bug(bug_id)
-        rec.status = new_status
-        self.put_bug(rec, None)
-        return rec
+        return self.update_bug(bug_id, status=new_status)
 
     def update_fields(self, bug_id, changes):
-        rec = self.get_bug(bug_id)
-        _apply_changes(rec, changes)
-        self.put_bug(rec, None)
-        return rec
+        return self.update_bug(bug_id, changes=changes)
+
+    def update_bug(self, bug_id, *, status=None, changes=None):
+        with self._lock(bug_id):
+            rec = self.get_bug(bug_id)
+            apply_changes(rec, changes or {}, status)
+            self.put_bug(rec, None)
+            return rec
 
     def _read_votes(self, bug_id) -> dict[str, str]:
         p = self._votes_path(bug_id)
@@ -443,20 +468,22 @@ class FilesystemStore:
     def add_vote(self, bug_id, voter, at=None):
         self.get_bug(bug_id)
         v = normal_voter(voter)
-        votes = self._read_votes(bug_id)
-        if v in votes:
-            return False
-        votes[v] = at or vote_time()
-        self._write_votes(bug_id, votes)
-        return True
+        with self._lock(bug_id):
+            votes = self._read_votes(bug_id)
+            if v in votes:
+                return False
+            votes[v] = at or vote_time()
+            self._write_votes(bug_id, votes)
+            return True
 
     def remove_vote(self, bug_id, voter):
         self.get_bug(bug_id)
-        votes = self._read_votes(bug_id)
-        if votes.pop(normal_voter(voter), None) is None:
-            return False
-        self._write_votes(bug_id, votes)
-        return True
+        with self._lock(bug_id):
+            votes = self._read_votes(bug_id)
+            if votes.pop(normal_voter(voter), None) is None:
+                return False
+            self._write_votes(bug_id, votes)
+            return True
 
     def vote_counts(self, bug_ids):
         return {i: len(self._read_votes(i)) for i in bug_ids}

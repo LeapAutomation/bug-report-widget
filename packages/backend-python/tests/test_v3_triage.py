@@ -273,6 +273,33 @@ def test_a_record_with_keys_this_version_does_not_know_still_loads():
 
 
 def test_every_triage_field_in_the_contract_has_a_record_attribute():
-    for wire in contract.TRIAGE_FIELDS:
-        attr = {"parentId": "parent_id", "duplicateOf": "duplicate_of"}.get(wire, wire)
+    assert tuple(contract.TRIAGE_WIRE_TO_ATTR) == contract.TRIAGE_FIELDS
+    for wire, attr in contract.TRIAGE_WIRE_TO_ATTR.items():
         assert attr in BugRecord.__dataclass_fields__
+        assert contract.TRIAGE_ATTR_TO_WIRE[attr] == wire
+
+
+# a value for each store-side list filter that matches NOTHING (the one report below has none of them set)
+EXCLUDING = {"app": "leaphq", "kind": "feature", "area": "zzz", "priority": "later"}
+
+
+def test_every_list_filter_in_the_contract_is_honoured_by_the_route(client):
+    file_bug(client)
+    assert len(client.get("/api/bugs?days=1").get_json()["bugs"]) == 1
+    for name in contract.LIST_FILTERS:
+        if name in ("status", "days"):
+            continue
+        assert name in EXCLUDING, f"contract.LIST_FILTERS gained {name!r}: teach the route and this test"
+        rows = client.get(f"/api/bugs?days=1&{name}={EXCLUDING[name]}").get_json()["bugs"]
+        assert rows == [], f"?{name}= is in the contract but the route ignores it"
+    assert client.get("/api/bugs?days=1&status=resolved").get_json()["bugs"] == []
+
+
+def test_the_store_protocol_takes_exactly_the_contracts_filters():
+    import inspect
+    from bug_report import InMemoryStore
+    from bug_report.store import FilesystemStore
+    want = set(contract.LIST_FILTERS) - {"status", "days"}
+    for cls in (InMemoryStore, FilesystemStore):
+        params = set(inspect.signature(cls.list_bugs).parameters) - {"self", "status", "since_iso"}
+        assert params == want, cls

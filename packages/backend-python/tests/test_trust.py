@@ -25,10 +25,10 @@ def principal(**claims):
     return base64.b64encode(json.dumps(body).encode()).decode()
 
 
-def caller(headers=None, json_body=None, method="POST", verifier=verify, trusted=TRUSTED, **opts):
+def caller(headers=None, json_body=None, method="POST", verifier=verify, trusted=TRUSTED, remote="203.0.113.9"):
     with Flask(__name__).test_request_context("/", method=method, headers=headers or {}, json=json_body,
-                                              environ_base={"REMOTE_ADDR": "203.0.113.9"}):
-        return trusted_caller(request, trusted, verifier, **opts)
+                                              environ_base={"REMOTE_ADDR": remote}):
+        return trusted_caller(request, trusted, verifier)
 
 
 def app_headers(azp=PLACEMENTS_ID, claim="azp", **extra):
@@ -38,8 +38,8 @@ def app_headers(azp=PLACEMENTS_ID, claim="azp", **extra):
 
 def test_a_trusted_app_is_believed_and_the_app_name_comes_from_its_token():
     c = caller(app_headers(**{"X-Leap-App": "placements"}))
-    assert (c.via, c.error, c.app, c.email, c.name, c.app_ignored) == (
-        "app", None, "placements", "chris@example.com", "Chris H", None)
+    assert (c.error, c.app, c.email, c.name, c.app_ignored) == (
+        None, "placements", "chris@example.com", "Chris H", None)
 
 
 def test_the_appid_claim_spelling_works_too():
@@ -57,27 +57,19 @@ def test_a_percent_encoded_name_is_decoded():
     assert c.name == "Seán O'Brien"
 
 
-def test_a_forged_actor_header_with_no_token_is_ignored():
-    c = caller({"X-Leap-Actor-Email": "boss@example.com", "X-Leap-Actor-Name": "Boss",
-                "X-Leap-App": "leaphq"})
-    assert (c.error, c.email, c.name, c.app, c.via) == (None, "", "", None, "anonymous")
 
 
-def test_a_forged_actor_header_does_not_beat_the_gateway_principal():
-    c = caller({"X-Ms-Client-Principal": principal(preferred_username="real@example.com", name="Real P"),
-                "X-Leap-Actor-Email": "boss@example.com"}, trust_easyauth=True)
-    assert (c.email, c.name, c.via, c.app) == ("real@example.com", "Real P", "person", None)
 
 
 def test_a_token_for_an_untrusted_app_is_refused_403_and_never_falls_back():
     c = caller({**app_headers(azp="client-stranger"),
-                "X-Ms-Client-Principal": principal(preferred_username="real@example.com")}, trust_easyauth=True)
-    assert c.error[0] == 403 and c.via == "refused" and c.email == "" and c.app is None
+                "X-Ms-Client-Principal": principal(preferred_username="real@example.com")})
+    assert c.error[0] == 403 and c.email == "" and c.app is None
 
 
 def test_a_verifier_that_raises_is_401_and_never_falls_back():
     c = caller({"Authorization": "Bearer forged", "X-Leap-Actor-Email": "boss@example.com",
-                "X-Ms-Client-Principal": principal(preferred_username="real@example.com")}, trust_easyauth=True)
+                "X-Ms-Client-Principal": principal(preferred_username="real@example.com")})
     assert c.error[0] == 401 and c.email == ""
 
 
@@ -98,12 +90,6 @@ def test_a_token_with_no_azp_or_appid_is_403():
     assert caller({"Authorization": "Bearer ok:sub=someone"}).error[0] == 403
 
 
-def test_a_person_through_the_gateway_may_name_a_known_app_in_the_body_only():
-    h = {"X-Ms-Client-Principal": principal(preferred_username="p@example.com")}
-    assert caller(h, {"details": "x", "app": "leaphq"}, trust_easyauth=True).app == "leaphq"
-    assert caller(h, {"details": "x", "app": "made-up"}, trust_easyauth=True).app is None
-    assert caller(h, {"details": "x"}, trust_easyauth=True).app is None
-    assert caller(h, {"app": "leaphq"}, method="GET", trust_easyauth=True).app is None
 
 
 def test_a_trusted_apps_body_app_is_ignored():
@@ -137,3 +123,38 @@ def test_is_admin_in_is_about_the_person_not_the_app_and_fails_closed():
         assert admin(request) is False
     with Flask(__name__).test_request_context("/", headers=app_headers()):
         assert tc.is_admin_in([])(request) is False
+
+
+# ---- no person path (Ken, 2026-11-14): every request needs an app token --------
+
+def test_no_bearer_token_is_401_even_with_actor_headers_and_a_forged_gateway_principal():
+    forged = {"X-Ms-Client-Principal": principal(preferred_username="boss@example.com", name="Boss"),
+              "X-Leap-Actor-Email": "boss@example.com", "X-Leap-Actor-Name": "Boss", "X-Leap-App": "leaphq",
+              "Tailscale-User-Login": "boss@example.com"}
+    for remote in ("203.0.113.9", "127.0.0.1"):           # a loopback peer changes nothing either
+        c = caller(forged, remote=remote)
+        assert c.error[0] == 401 and (c.email, c.name, c.app) == ("", "", None), remote
+    assert caller({}).error[0] == 401
+
+
+def test_there_is_no_option_to_turn_the_gateway_principal_on():
+    # `trust_easyauth` belongs to an app's own trusted_person(); asking the service for it is an error, not a no-op
+    with Flask(__name__).test_request_context("/", headers={"X-Ms-Client-Principal": principal(preferred_username="b@example.com")}):
+        with pytest.raises(TypeError):
+            trusted_caller(request, TRUSTED, verify, trust_easyauth=True)
+        with pytest.raises(TypeError):
+            TrustedCallers(TRUSTED, verify, trust_easyauth=True)
+
+
+def test_the_guard_refuses_a_forged_principal_with_401_on_the_blueprint():
+    from bug_report import InMemoryStore, create_blueprint
+    callers = TrustedCallers(TRUSTED, verify)
+    app = Flask(__name__)
+    app.register_blueprint(create_blueprint(store=InMemoryStore(), guard=callers.guard,
+                                            actor_identity=callers.actor_identity, app_stamp=callers.app_stamp))
+    c = app.test_client()
+    r = c.post("/bugs", json={"details": "x"}, headers={"X-Ms-Client-Principal": principal(preferred_username="b@example.com")})
+    assert r.status_code == 401
+    for method, path in (("get", "/bugs"), ("get", "/bugs/bug-20261101-100000-aaaaaa"), ("get", "/bugs/bug-20261101-100000-aaaaaa/screenshot"),
+                         ("post", "/bugs/bug-20261101-100000-aaaaaa/vote")):
+        assert getattr(c, method)(path).status_code == 401, path

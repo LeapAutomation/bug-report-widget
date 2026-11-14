@@ -73,6 +73,11 @@ def test_every_field_the_server_sends_is_in_the_spec(tmp_path):
 
     assert set(summary) - summary_spec == set()
     assert set(detail) - bug_spec == set()
+    # and the other way: every property the spec names is one the server really sends
+    # (`notified` appears on a PATCH response only; `canNotify` on a detail read only)
+    assert summary_spec - set(summary) == set(), "the spec promises a summary field the server does not send"
+    assert bug_spec - {"notified"} - set(detail) == set(), "the spec promises a detail field the server does not send"
+    assert audit_spec - set(closed["audit"][0]) == set(), "the spec promises an audit field the server does not send"
     assert set(closed) - bug_spec == set()
     for row in closed["audit"]:
         assert set(row) - audit_spec == set()

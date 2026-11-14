@@ -21,13 +21,19 @@ deployed by this change. Contract v3 adds to v2 and removes nothing: a v2 record
   `ensure_schema()`; the constructor takes a connection factory (so a service can pass an Entra-token password).
   The `Store` protocol gains `update_fields`, `add_vote`, `remove_vote`, `vote_counts`, `list_votes` and the
   filter arguments to `list_bugs`; both file stores, `InMemoryStore` and `PostgresStore` implement them.
-- **`import_reports(src, dst, app)`**: idempotent copy keeping ids, audit, screenshots and votes.
+- **`import_reports(src, dst, app)`**: one run, at cutover, with the app's writes frozen. Keeps ids, audit, screenshots
+  and votes; `app` must be in `APP_PRODUCTS`. A second run copies nothing; if a report already there differs from the
+  source (status, triage fields, votes, audit length and last row) it raises `ImportMismatch` with the ids and writes nothing.
 - **`create_proxy_blueprint(central_url, app, token_provider, person_provider)`**: an app's `/api/bugs` that
   forwards every route to the central service as the app's own identity, naming the signed-in person in headers.
-- **`TrustedCallers` / `trusted_caller(request, trusted_apps, verify_token)`**: the service side. Believes the
-  proxy's actor headers only behind a verified bearer token from a trusted app; the app name comes from the token.
-- **`bug_report.identity`**: `trusted_person` / `trusted_identity` moved in from the apps, configured by
-  arguments (`trust_easyauth`, `loopback_headers`) rather than environment reads.
+  Refuses `..` path segments; its 502 bodies carry no exception text.
+- **`TrustedCallers` / `trusted_caller(request, trusted_apps, verify_token)`**: the service side, with NO person path:
+  every request needs a bearer token (401 without; 403 from an untrusted app); the actor headers are believed only behind a
+  verified token from a trusted app. `verify_token` (the service's, PyJWT) must check signature, issuer, audience and expiry.
+- **`bug_report.identity`**: `trusted_person` / `trusted_identity` moved in from the apps, for an app's own proxy; configured by
+  arguments (`trust_easyauth`, `loopback_headers`, default off) rather than environment reads.
+- **Concurrent PATCHes** of different fields of one report both land: `Store.update_bug` is one atomic step
+  (`PostgresStore`: `SELECT ... FOR UPDATE` then one UPDATE; `FilesystemStore`: a lock per report).
 - **`create_blueprint`** gains `app_stamp` and `guard`; the POST response carries `app`.
 - **Node backend** (`backend-node`): the same v3 fields, PATCH triage, filters and votes, minimal (file and
   in-memory stores; the Azure Tables store does not keep them yet and answers 501).

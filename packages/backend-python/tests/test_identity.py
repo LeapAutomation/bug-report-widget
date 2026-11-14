@@ -39,10 +39,14 @@ def test_email_claim_preference_order_and_malformed_principal():
 
 def test_tailscale_headers_need_a_loopback_peer():
     h = {"Tailscale-User-Login": "ken@example.com", "Tailscale-User-Name": "Ken M"}
-    assert person(h, remote="203.0.113.9") == {"email": "", "name": ""}   # a LAN peer could forge them
-    assert person(h, remote="127.0.0.1") == {"email": "ken@example.com", "name": "Ken M"}
-    assert person(h, remote="::1")["email"] == "ken@example.com"
-    assert person(h, remote="127.0.0.1", loopback_headers=False)["email"] == ""
+    assert person(h, remote="203.0.113.9", loopback_headers=True) == {"email": "", "name": ""}   # a LAN peer could forge them
+    assert person(h, remote="127.0.0.1", loopback_headers=True) == {"email": "ken@example.com", "name": "Ken M"}
+    assert person(h, remote="::1", loopback_headers=True)["email"] == "ken@example.com"
+
+
+def test_tailscale_headers_are_off_by_default_even_from_loopback():
+    h = {"Tailscale-User-Login": "ken@example.com"}
+    assert person(h, remote="127.0.0.1")["email"] == ""
 
 
 def test_env_flag():

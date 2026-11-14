@@ -35,7 +35,7 @@ except ImportError as e:  # pragma: no cover
     raise ImportError(
         'PostgresStore needs psycopg 3: pip install "bug-report-py[postgres]"') from e
 
-from .store import (AuditEntry, BugRecord, NotFound, StoreError, TRIAGE_ATTRS,
+from .store import (AuditEntry, BugRecord, NotFound, StoreError, apply_changes,
                     normal_voter, vote_time)
 
 SCHEMA = """
@@ -137,9 +137,14 @@ class PostgresStore:
         return BugRecord.from_dict(row[0])
 
     def list_bugs(self, *, status, since_iso, app=None, kind=None, area=None, priority=None):
-        # `since_iso` is compared as text against the record's own added_at,
-        # exactly as the filesystem store does, so the two agree on the edge.
-        where, args = ["record->>'added_at' >= %s"], [since_iso or ""]
+        # `since_iso` is an instant: compared on the `added_at` column (indexed),
+        # not as text. A report whose added_at will not parse has a NULL there
+        # and is not listed once a window is given.
+        where, args = [], []
+        since = _instant(since_iso)
+        if since is not None:
+            where.append("added_at >= %s")
+            args.append(since)
         for col, val in (("status", status), ("app", app), ("kind", kind),
                          ("area", area), ("priority", priority)):
             if val:
@@ -147,26 +152,39 @@ class PostgresStore:
                 args.append(val)
 
         def go(cur):
-            cur.execute("SELECT record FROM reports WHERE " + " AND ".join(where)
-                        + " ORDER BY record->>'added_at'", args)
+            cur.execute("SELECT record FROM reports" + (" WHERE " + " AND ".join(where) if where else "")
+                        + " ORDER BY added_at, id", args)
             return cur.fetchall()
         for (rec,) in self._run(go):
             yield BugRecord.from_dict(rec)
 
     def update_status(self, bug_id: str, new_status: str) -> BugRecord:
-        rec = self.get_bug(bug_id)
-        rec.status = new_status
-        self.put_bug(rec, None)
-        return rec
+        return self.update_bug(bug_id, status=new_status)
 
     def update_fields(self, bug_id: str, changes: dict) -> BugRecord:
-        rec = self.get_bug(bug_id)
-        for k, v in changes.items():
-            if k not in TRIAGE_ATTRS:
-                raise StoreError(f"not a triage field: {k}")
-            setattr(rec, k, v)
-        self.put_bug(rec, None)
-        return rec
+        return self.update_bug(bug_id, changes=changes)
+
+    def update_bug(self, bug_id: str, *, status: str | None = None,
+                   changes: dict | None = None) -> BugRecord:
+        """One transaction: lock the row (``SELECT ... FOR UPDATE``), change the
+        record, write it back with one UPDATE. Two PATCHes of different fields
+        of one report queue behind each other instead of the second putting
+        back the first's old values."""
+        def go(cur):
+            cur.execute("SELECT record FROM reports WHERE id=%s FOR UPDATE", (bug_id,))
+            row = cur.fetchone()
+            if row is None:
+                raise NotFound(bug_id)
+            rec = BugRecord.from_dict(row[0])
+            apply_changes(rec, changes or {}, status)
+            cur.execute(
+                "UPDATE reports SET app=%s, kind=%s, status=%s, added_at=%s, area=%s, priority=%s, "
+                "owner=%s, parent_id=%s, duplicate_of=%s, record=%s WHERE id=%s",
+                (rec.app, rec.effective_kind(), rec.status, _instant(rec.added_at), rec.area,
+                 rec.priority, rec.owner, rec.parent_id, rec.duplicate_of,
+                 Jsonb(dataclasses.asdict(rec)), bug_id))
+            return rec
+        return self._run(go)
 
     def append_audit(self, bug_id: str, entry: AuditEntry) -> None:
         def go(cur):

@@ -72,21 +72,26 @@ service whose password is a short-lived Entra token passes a factory that fetche
 `pool.connection` works too. The `record` jsonb column holds what `FilesystemStore` writes (the same JSON, key for key;
 jsonb does not keep key order or whitespace); `app`, `kind`, `status`, `added_at`, `area`, `priority`, `owner`,
 `parent_id` and `duplicate_of` are copies lifted out for the list filters, and `kind` there is the effective kind
-(stored, else derived from the tags). Database errors surface as `StoreError`.
+(stored, else derived from the tags). `since` is filtered on the `added_at` column. `update_bug` (what PATCH calls) is one
+transaction: `SELECT ... FOR UPDATE` on the row, then one UPDATE, so two PATCHes of different fields both land.
+Database errors surface as `StoreError`.
 
 ## Moving an app's reports into the central store (3.0.0)
 
 ```python
-from bug_report import FilesystemStore, import_reports
+from bug_report import FilesystemStore, ImportMismatch, import_reports
 from bug_report.pg import PostgresStore
 
 counts = import_reports(FilesystemStore("/data/bugs"), PostgresStore(connect), app="placements")
 # {"copied": {"open": 12, "declined": 3}, "skipped": {}, "audit": 41, "screenshots": 9, "votes": 0}
 ```
 
-Keeps ids, audit rows, screenshots and votes; a report that has no `app` gets this one. Idempotent and resumable: a
-report already there is skipped (and counted under `skipped`), but audit rows or votes it is missing are filled in,
-so a second run over a finished import copies nothing.
+**One run, at cutover, with the app's writes frozen.** It keeps ids, audit rows, screenshots and votes; a report that has
+no `app` gets this one, which must be in `contract.APP_PRODUCTS` (else `ValueError`, nothing touched). A second run over
+a finished import copies nothing (those reports are counted under `skipped`). It first compares every report already
+in the destination with the source (status, triage fields, votes, audit length and last audit row); if any differs it raises
+`ImportMismatch` with `.ids` and writes nothing, so a source edited after the first run is noticed, not half-merged.
+There is no resume: a run that died half-way shows up as differing ids on the next.
 
 ## An app's `/api/bugs` as a proxy to the central service (3.0.0)
 
@@ -106,8 +111,8 @@ Every route (POST, list, detail, PATCH, vote, screenshot) is forwarded with its 
 and the service's status, body, content type and `Location` come back unchanged (a 302 to a signed screenshot URL is
 not followed). Each forwarded request carries `Authorization: Bearer <token_provider()>`, `X-Leap-Actor-Email` and
 `X-Leap-Actor-Name` (percent-encoded) from `person_provider()`, and `X-Leap-App: <app>`; the browser's own
-`Authorization` and `X-Leap-*` headers are dropped. A service that cannot be reached is a 502 with a message; a token or
-identity that cannot be produced is a 502 and nothing is sent. Standard library only (urllib).
+`Authorization` and `X-Leap-*` headers are dropped. A `..` path segment is refused (400). A service that cannot be reached is a 502, and a token or identity that cannot be
+produced is a 502 with nothing sent; the 502 bodies are generic (the reason goes to the log, not the browser). Standard library only (urllib).
 
 ## The service side: who is calling (3.0.0)
 
@@ -117,23 +122,27 @@ from bug_report import TrustedCallers, create_blueprint
 callers = TrustedCallers(
     trusted_apps={"<placements client id>": "placements", "<seal client id>": "sealviewer"},
     verify_token=verify_entra_token,          # YOURS: raw bearer token -> claims dict, or raise. No JWT code here.
-    trust_easyauth=True,                      # for the person-through-the-gateway path
 )
 create_blueprint(store=store, actor_identity=callers.actor_identity, app_stamp=callers.app_stamp,
                  guard=callers.guard, is_admin=callers.is_admin_in(BUG_ADMINS))
 ```
 
-`trusted_caller(request, trusted_apps, verify_token)` is the function underneath. With a bearer token: it is verified
-(a verifier that raises, or returns no claims, is 401); its `azp` or `appid` claim must be in `trusted_apps` (else 403);
-only then are `X-Leap-Actor-Email` / `-Name` believed and `app` is the mapped name. A bad or untrusted token never falls
-back to the headers. A disagreeing `X-Leap-App` is ignored, and the response says which won: `X-Leap-App-Used` and
-`X-Leap-App-Ignored` headers, `app` and `appIgnored` in the POST body. With no bearer token the caller is a person
-through the gateway: `X-Leap-Actor-*` are not read (anyone could send them); the actor is what
-`identity.trusted_person` finds, and `app` is null unless the body names a known one.
+**`verify_token` must check the signature, the issuer, the audience and the expiry.** A verifier that only decodes the
+token makes every trusted client id spoofable: anyone can write `azp` into a token they made up. (The service uses PyJWT
+with the tenant's signing keys; this library has no JWT dependency, by design.)
 
-`bug_report.identity` holds that person logic, moved out of the apps (`trusted_person`, `trusted_identity`,
-`entra_claims`, `env_flag`): `trust_easyauth=True` believes EasyAuth's `X-Ms-Client-Principal`; `loopback_headers=True`
-believes Tailscale Serve's headers from a loopback peer only. Nothing reads the environment for you.
+**Every request needs a valid app token; there is no person path** (Ken, 2026-11-14). `trusted_caller(request,
+trusted_apps, verify_token)` is the function underneath. No bearer token is 401, and the service never reads
+`X-Ms-Client-Principal` or Tailscale headers, whatever else the request carries. A verifier that raises or returns no claims
+is 401; a token whose `azp` or `appid` claim is not in `trusted_apps` is 403; neither falls back to anything. Only behind a
+good token from a trusted app are `X-Leap-Actor-Email` / `-Name` believed, and `app` is the mapped name. A disagreeing
+`X-Leap-App` is ignored, and the response says which won: `X-Leap-App-Used` and `X-Leap-App-Ignored` headers, `app` and
+`appIgnored` in the POST body.
+
+`bug_report.identity` holds the person logic for an APP behind its own gateway (its `trusted_person()`, handed to
+`create_proxy_blueprint`): `trusted_person`, `trusted_identity`, `entra_claims`, `env_flag`. `trust_easyauth=True` believes
+EasyAuth's `X-Ms-Client-Principal`; `loopback_headers=True` (off by default) believes Tailscale Serve's headers from a
+loopback peer only. Nothing reads the environment for you. The central service does not use any of this.
 
 ## Emailing the reporter on close (2.2.0)
 

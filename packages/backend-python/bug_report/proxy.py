@@ -21,12 +21,16 @@ the page's claim, is what the service looks at. Standard library only.
 """
 from __future__ import annotations
 
+import json
+import logging
 import urllib.error
 import urllib.request
 from typing import Callable
 from urllib.parse import quote
 
 from flask import Blueprint, Response, request
+
+log = logging.getLogger(__name__)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -61,6 +65,8 @@ def create_proxy_blueprint(
     @bp.route(url_prefix, defaults={"rest": ""}, methods=["GET", "POST", "PATCH", "DELETE"])
     @bp.route(f"{url_prefix}/<path:rest>", methods=["GET", "POST", "PATCH", "DELETE"])
     def forward(rest: str):
+        if any(seg in ("..", ".") or "\\" in seg for seg in rest.split("/")):
+            return _err(400, "invalid path")
         url = base + ("/" + rest if rest else "")
         if request.query_string:
             url += "?" + request.query_string.decode("latin-1")
@@ -74,7 +80,8 @@ def create_proxy_blueprint(
                 "X-Leap-App": app,
             })
         except Exception as e:  # noqa: BLE001 — no token / identity: say so, do not guess
-            return _err(502, f"could not authenticate to the reports service: {e}")
+            log.warning("reports proxy (%s): could not get a token or identity: %s", app, e)
+            return _err(502, "could not authenticate to the reports service")
         data = request.get_data() if request.method in ("POST", "PATCH", "DELETE") else None
         req = urllib.request.Request(url, data=data, headers=headers, method=request.method)
         try:
@@ -86,7 +93,8 @@ def create_proxy_blueprint(
             finally:
                 e.close()
         except (urllib.error.URLError, OSError, TimeoutError) as e:
-            return _err(502, f"the reports service is not reachable ({getattr(e, 'reason', e)})")
+            log.warning("reports proxy (%s): %s unreachable: %s", app, url, getattr(e, "reason", e))
+            return _err(502, "the reports service is not reachable")
 
     def _relay(status, body, upstream_headers):
         resp = Response(body, status=status)
@@ -97,7 +105,6 @@ def create_proxy_blueprint(
         return resp
 
     def _err(status, message):
-        import json
         return Response(json.dumps({"error": message}), status=status, mimetype="application/json")
 
     return bp

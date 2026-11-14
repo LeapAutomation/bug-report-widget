@@ -116,8 +116,17 @@ APP_PRODUCTS = {
 
 PRIORITIES = ("now", "next", "later")
 
-#: What PATCH may set besides the status (wire name; the record's attribute is snake_case).
-TRIAGE_FIELDS = ("area", "priority", "owner", "parentId", "duplicateOf")
+#: What PATCH may set besides the status: wire name -> the record's attribute. The ONE map;
+#: everything else (the blueprint, the stores, audit notes) derives from it.
+TRIAGE_WIRE_TO_ATTR = {
+    "area": "area",
+    "priority": "priority",
+    "owner": "owner",
+    "parentId": "parent_id",
+    "duplicateOf": "duplicate_of",
+}
+TRIAGE_ATTR_TO_WIRE = {a: w for w, a in TRIAGE_WIRE_TO_ATTR.items()}
+TRIAGE_FIELDS = tuple(TRIAGE_WIRE_TO_ATTR)
 
 LIST_FILTERS = ("status", "days", "app", "kind", "area", "priority")
 

@@ -180,7 +180,7 @@ def test_a_name_with_accents_survives_the_header(front, central):
 def test_a_central_that_is_down_is_a_502_with_a_message():
     f = Front("http://127.0.0.1:9")
     r = f.c.post("/api/bugs", json={"details": "x"})
-    assert r.status_code == 502 and "not reachable" in r.get_json()["error"]
+    assert r.status_code == 502 and r.get_json() == {"error": "the reports service is not reachable"}   # no host, no reason
 
 
 def test_a_token_provider_that_fails_is_a_502_never_an_unauthenticated_call(central):
@@ -190,7 +190,8 @@ def test_a_token_provider_that_fails_is_a_502_never_an_unauthenticated_call(cent
     app = Flask(__name__)
     app.register_blueprint(create_proxy_blueprint(s.url + "/bugs", "placements", boom, lambda: {}), url_prefix="/api")
     r = app.test_client().post("/api/bugs", json={"details": "x"})
-    assert r.status_code == 502 and "could not authenticate" in r.get_json()["error"]
+    assert r.status_code == 502 and r.get_json() == {"error": "could not authenticate to the reports service"}
+    assert "managed identity" not in r.get_data(as_text=True)    # the exception text stays in the log
     assert seen == []                    # nothing reached the service
 
 
@@ -224,3 +225,31 @@ def test_a_non_json_body_and_content_type_come_back_untouched():
         assert (r.status_code, r.content_type, r.data.decode()) == (200, "text/plain; charset=utf-8", "plain text ✓")
     finally:
         s.stop()
+
+
+def test_a_dot_dot_path_segment_is_refused_400_and_never_forwarded(front, central):
+    _, _, seen = central
+    n = len(seen)
+    for path in ("/api/bugs/../admin", "/api/bugs/bug-20261101-100000-aaaaaa/../../x", "/api/bugs/./x"):
+        r = front.c.get(path)
+        assert r.status_code in (400, 404), path          # werkzeug may normalise `..` away before the route
+    r = front.c.open("/api/bugs/%2e%2e/admin")
+    assert r.status_code == 400 and r.get_json() == {"error": "invalid path"}
+    r = front.c.open("/api/bugs/x%5Cy")
+    assert r.status_code == 400
+    assert len(seen) == n
+
+
+def test_the_central_service_itself_refuses_a_request_with_no_token(central):
+    import urllib.error
+    import urllib.request
+    s, _, _ = central
+    for headers in ({}, {"X-Leap-Actor-Email": "admin@example.com", "X-Leap-App": "leaphq"},
+                    {"X-Ms-Client-Principal": base64.b64encode(json.dumps(
+                        {"claims": [{"typ": "preferred_username", "val": "admin@example.com"}]}).encode()).decode()}):
+        req = urllib.request.Request(s.url + "/bugs", data=b'{"details": "x"}', headers={"Content-Type": "application/json", **headers})
+        try:
+            urllib.request.urlopen(req)
+            raise AssertionError("expected 401")
+        except urllib.error.HTTPError as e:
+            assert e.code == 401

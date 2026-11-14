@@ -1,4 +1,7 @@
-"""Who is asking: the signed-in person behind a request.
+"""Who is asking: the signed-in person behind a request, for an APP behind
+its own gateway (its ``trusted_person()``, passed to ``create_proxy_blueprint``).
+The central service does not use this: it requires an app token on every
+request (``bug_report.trust``).
 
 Moved here from the apps (stoppageviewer's ``trusted_identity`` /
 ``trusted_person``, the near-identical copies in PIV, seal and the fleet
@@ -12,7 +15,7 @@ Two sources, both only when the app says to believe them:
   claims), stripping any client-supplied copy. The flag is explicit rather
   than inferred: believing that header when EasyAuth is NOT attached lets
   anyone mint an identity.
-* **Tailscale Serve** (``loopback_headers=True``): Serve injects
+* **Tailscale Serve** (``loopback_headers=True``, off by default): Serve injects
   ``Tailscale-User-Login`` / ``-Name`` and dials the backend from loopback.
   Apps bind 0.0.0.0 (WSL2), which also exposes the port to the LAN, so the
   loopback peer is required as well.
@@ -70,7 +73,7 @@ def _on_loopback(request) -> bool:
 
 
 def trusted_identity(request, *, trust_easyauth: bool = False,
-                     loopback_headers: bool = True,
+                     loopback_headers: bool = False,
                      identity_headers=TAILSCALE_HEADERS) -> str:
     """The caller's address, or "" when it cannot be trusted."""
     if trust_easyauth:
@@ -86,7 +89,7 @@ def trusted_identity(request, *, trust_easyauth: bool = False,
 
 
 def trusted_person(request, *, trust_easyauth: bool = False,
-                   loopback_headers: bool = True,
+                   loopback_headers: bool = False,
                    identity_headers=TAILSCALE_HEADERS) -> dict:
     """The trusted caller as ``{"email", "name"}``: who filed a report and who
     moved it on, named. The name comes from the same sign-in as the address,

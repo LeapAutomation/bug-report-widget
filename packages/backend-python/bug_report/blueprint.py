@@ -24,6 +24,7 @@ from .models import (
     screenshot_content_type,
     valid_bug_id,
 )
+from .trust import ENVIRON_KEY
 from .store import (
     AuditEntry,
     BugRecord,
@@ -32,6 +33,9 @@ from .store import (
 )
 
 log = logging.getLogger(__name__)
+
+#: the list filters a Store takes: the contract's, less the two the route itself reads
+_STORE_FILTERS = tuple(f for f in contract.LIST_FILTERS if f not in ("status", "days"))
 
 _last_now_ns = 0
 
@@ -127,7 +131,7 @@ def create_blueprint(
     def _say_which_app_won(resp):
         # Set by TrustedCallers: the app the token says, and the one the caller
         # claimed in X-Leap-App when the two disagreed (the claim lost).
-        caller = request.environ.get("bug_report.caller")
+        caller = request.environ.get(ENVIRON_KEY)
         if caller is not None and getattr(caller, "app", None):
             resp.headers["X-Leap-App-Used"] = caller.app
             if getattr(caller, "app_ignored", None):
@@ -187,8 +191,7 @@ def create_blueprint(
         if added_by == "agent" and "agent-self-report" not in tags:
             tags.append("agent-self-report")
 
-        kind = payload.get("kind")
-        kind = kind if kind in contract.KINDS else contract.kind_from_tags(tags)
+        kind = contract.effective_kind(payload.get("kind"), tags)
         app = None
         if app_stamp is not None:
             try:
@@ -242,7 +245,7 @@ def create_blueprint(
             note="filed",
         ))
         out = {"id": bug.id, "app": app}
-        caller = request.environ.get("bug_report.caller")
+        caller = request.environ.get(ENVIRON_KEY)
         if getattr(caller, "app_ignored", None):
             out["appIgnored"] = caller.app_ignored
         return jsonify(out), 201
@@ -260,16 +263,13 @@ def create_blueprint(
             days = max(1, min(365, int(request.args.get("days") or 30)))
         except ValueError:
             return jsonify({"error": "days must be an integer"}), 400
-        kind_filter = (request.args.get("kind") or "").strip() or None
-        if kind_filter and kind_filter not in contract.KINDS:
+        # the store's filters are the contract's (`listFilters`) minus the two handled above
+        wanted = {f: (request.args.get(f) or "").strip() or None for f in _STORE_FILTERS}
+        if wanted.get("kind") and wanted["kind"] not in contract.KINDS:
             return jsonify({"error": f"kind must be one of {contract.KINDS}"}), 400
-        priority_filter = (request.args.get("priority") or "").strip() or None
-        if priority_filter and priority_filter not in contract.PRIORITIES:
+        if wanted.get("priority") and wanted["priority"] not in contract.PRIORITIES:
             return jsonify({"error": f"priority must be one of {contract.PRIORITIES}"}), 400
-        bugs = list(store.list_bugs(
-            status=status_filter, since_iso=_since_iso(days),
-            app=(request.args.get("app") or "").strip() or None, kind=kind_filter,
-            area=(request.args.get("area") or "").strip() or None, priority=priority_filter))
+        bugs = list(store.list_bugs(status=status_filter, since_iso=_since_iso(days), **wanted))
         counts = _vote_counts([b.id for b in bugs])
         rows = [contract.with_kind({**b.to_summary(), "votes": counts.get(b.id, 0)}) for b in bugs]
         rows.sort(key=lambda r: r["addedAt"], reverse=True)
@@ -314,7 +314,7 @@ def create_blueprint(
             raw = payload[wire]
             val = None if raw is None else str(raw).strip()
             val = val or None
-            attr = {"parentId": "parent_id", "duplicateOf": "duplicate_of"}.get(wire, wire)
+            attr = contract.TRIAGE_WIRE_TO_ATTR[wire]
             if wire == "area" and val and len(val) > 100:
                 return None, (400, "area is at most 100 characters")
             if wire == "priority" and val and val not in contract.PRIORITIES:
@@ -345,12 +345,10 @@ def create_blueprint(
                 changes[attr] = val
         return changes, None
 
-    _WIRE = {"parent_id": "parentId", "duplicate_of": "duplicateOf"}
-
     def _describe(bug, changes) -> str:
         shown = lambda v: "none" if v is None else str(v)  # noqa: E731
         return "; ".join(
-            f"{_WIRE.get(a, a)}: {shown(getattr(bug, a))} -> {shown(v)}" for a, v in changes.items()
+            f"{contract.TRIAGE_ATTR_TO_WIRE[a]}: {shown(getattr(bug, a))} -> {shown(v)}" for a, v in changes.items()
         )[:500]
 
     @bp.route(f"{url_prefix}/<bug_id>", methods=["PATCH"])
@@ -420,10 +418,10 @@ def create_blueprint(
         decline_row = new_status != old_status
         described = _describe(bug, {a: v for a, v in changes.items()
                                     if not (decline_row and a == "duplicate_of")})
-        if changes:
-            bug = store.update_fields(bug_id, changes)
+        if changes or decline_row:
+            # one atomic write of status and fields together (no lost update)
+            bug = store.update_bug(bug_id, status=new_status if decline_row else None, changes=changes)
         if decline_row:
-            bug = store.update_status(bug_id, new_status)
             store.append_audit(bug_id, AuditEntry(
                 changed_at=_now_iso(),
                 to_status=new_status,

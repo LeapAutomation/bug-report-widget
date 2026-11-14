@@ -20,7 +20,7 @@ in ../../e2e enforce that this and the Node backend stay honest.
 """
 
 from .blueprint import create_blueprint
-from .importer import import_reports
+from .importer import ImportMismatch, import_reports
 from .proxy import create_proxy_blueprint
 from .trust import Caller, TrustedCallers, trusted_caller
 from . import identity
@@ -69,6 +69,7 @@ __all__ = [
     "create_blueprint",
     "create_proxy_blueprint",
     "import_reports",
+    "ImportMismatch",
     "trusted_caller",
     "TrustedCallers",
     "Caller",

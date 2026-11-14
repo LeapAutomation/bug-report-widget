@@ -4,7 +4,9 @@ from __future__ import annotations
 import copy
 import dataclasses
 
-from bug_report import FilesystemStore, InMemoryStore, import_reports
+import pytest
+
+from bug_report import FilesystemStore, ImportMismatch, InMemoryStore, import_reports
 from bug_report.store import AuditEntry, BugRecord
 
 SHOT = b"\x89PNG\r\n\x1a\nfake"
@@ -61,16 +63,60 @@ def test_import_into_postgres_keeps_everything_and_a_second_run_copies_nothing(t
     assert everything(pg_store) == snapshot                     # and nothing changed under it
 
 
-def test_a_run_that_died_half_way_is_finished_not_duplicated(tmp_path):
+def test_a_source_edited_between_runs_raises_naming_the_ids_and_changes_nothing(tmp_path):
+    src = seeded(tmp_path / "bugs")
+    dst = InMemoryStore()
+    import_reports(src, dst, app="report")
+    before = everything(dst)
+    before = copy.deepcopy(before)
+    edits = {
+        "status": lambda i: src.update_status(i, "triaged"),
+        "triage field": lambda i: src.update_fields(i, {"area": "Belt"}),
+        "vote": lambda i: src.add_vote(i, "late@example.com"),
+        "audit row": lambda i: src.append_audit(i, AuditEntry(changed_at="2026-12-01T00:00:00Z", to_status="open", note="late")),
+    }
+    ids = ["bug-20261101-100000-aaaaaa", "bug-20261103-100000-cccccc", "bug-20261104-100000-dddddd", "bug-20261102-100000-bbbbbb"]
+    for (label, edit), bid in zip(edits.items(), ids):
+        edit(bid)
+    # a report added to the source after the first run would be new, not a difference
+    with pytest.raises(ImportMismatch) as e:
+        import_reports(src, dst, app="report")
+    assert sorted(e.value.ids) == sorted(ids)
+    assert all(i in str(e.value) for i in ids)
+    assert everything(dst) == before                       # nothing was written, new or old
+
+
+def test_the_last_audit_row_is_compared_not_just_the_count(tmp_path):
+    src = seeded(tmp_path / "bugs")
+    dst = InMemoryStore()
+    import_reports(src, dst, app="report")
+    bid = "bug-20261103-100000-cccccc"
+    audit_path = src._audit_path(bid)
+    lines = audit_path.read_text().splitlines()
+    lines[-1] = lines[-1].replace("row 2", "row EDITED")      # same number of rows, last one changed
+    audit_path.write_text("\n".join(lines) + "\n")
+    with pytest.raises(ImportMismatch) as e:
+        import_reports(src, dst, app="report")
+    assert e.value.ids == [bid]
+
+
+def test_a_run_that_died_half_way_is_reported_not_silently_finished(tmp_path):
     src = seeded(tmp_path / "bugs")
     dst = InMemoryStore()
     bid = "bug-20261104-100000-dddddd"
-    dst.put_bug(dataclasses.replace(src.get_bug(bid), app="x"), None)     # the report, but no audit rows
-    dst.append_audit(bid, src.list_audit(bid)[0])                          # and one of its four
-    out = import_reports(src, dst, app="x")
-    assert out["skipped"] == {"open": 1} and out["copied"] == {"open": 1, "triaged": 1, "declined": 1}
-    assert [a.note for a in dst.list_audit(bid)] == [f"row {j}" for j in range(4)]
-    assert import_reports(src, dst, app="x")["audit"] == 0
+    dst.put_bug(dataclasses.replace(src.get_bug(bid), app="report"), None)     # the report, but no audit rows
+    with pytest.raises(ImportMismatch) as e:
+        import_reports(src, dst, app="report")
+    assert e.value.ids == [bid]
+
+
+@pytest.mark.parametrize("bad", ["", "nope", "Placements", None])
+def test_the_app_must_be_one_the_contract_knows_and_nothing_is_touched(tmp_path, bad):
+    src = seeded(tmp_path / "bugs")
+    dst = InMemoryStore()
+    with pytest.raises(ValueError):
+        import_reports(src, dst, app=bad)
+    assert list(dst.list_bugs(status=None, since_iso="")) == []
 
 
 def test_an_app_already_on_a_report_is_kept(tmp_path):
