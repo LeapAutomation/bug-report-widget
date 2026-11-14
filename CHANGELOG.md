@@ -2,6 +2,19 @@
 
 All notable changes to this monorepo.
 
+## backends v3.0.1 — 2026-11-14 (`bug-report-py` 3.0.1)
+
+Two fixes to `create_proxy_blueprint` from the first review of the seal viewer's move. No contract change.
+
+- **A refusal of the APP is a 502, never a 401/403.** The service marks what its `guard` refuses (no, bad or untrusted
+  app token) with `X-Leap-Trust-Refusal: 1`; the proxy turns that 401/403 into a 502 `{"error": "the reports service
+  refused this app"}` and logs the real status and body. A seal laptop reads a 401 from its hosted app as "your station
+  pass was refused", signs the operator out and holds the report for good: a setup mistake must not look like that. The
+  blueprint's own 403 (not an admin) and 401 (sign in to vote) are about the person and pass through. A service older
+  than 3.0.1 sets no marker, so its refusals still pass through as they were.
+- **A list with no `app` query asks for this app's own reports** (`app=<its app>` is added). The queue and the open count
+  no longer show every app's. An explicit `app` passes through as given.
+
 ## backends v3.0.0 — 2026-11-14 (`bug-report-py` 3.0.0)
 
 One central store for every app's reports (design: `CENTRAL-STORE.md`). The Python library only; nothing is

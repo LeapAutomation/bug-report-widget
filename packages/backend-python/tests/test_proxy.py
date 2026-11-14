@@ -141,21 +141,51 @@ def test_a_non_admin_person_gets_the_central_403_through_the_proxy(front):
     assert front.c.post(f"/api/bugs/{bid}/vote").status_code == 200      # voting is for anyone signed in
 
 
-def test_an_untrusted_app_token_is_refused_403_on_every_route(front):
+def test_an_untrusted_app_is_a_502_on_every_route_not_a_403(front):
+    """The app was refused, not the person: a 403 here would read as the person's (3.0.1)."""
     bid = file(front)
     front.token[0] = "ok:client-stranger"
     for method, path in (("post", "/api/bugs"), ("get", "/api/bugs"), ("get", f"/api/bugs/{bid}"),
                          ("patch", f"/api/bugs/{bid}"), ("post", f"/api/bugs/{bid}/vote"),
                          ("get", f"/api/bugs/{bid}/screenshot")):
         r = getattr(front.c, method)(path, json={"details": "x", "status": "triaged"} if method != "get" else None)
-        assert r.status_code == 403, (method, path)
-        assert r.get_json()["error"] == "caller is not a trusted app"
+        assert r.status_code == 502, (method, path)
+        assert r.get_json() == {"error": "the reports service refused this app"}
 
 
-def test_a_token_that_does_not_verify_is_401(front):
+def test_a_token_that_does_not_verify_is_a_502_not_a_401(front):
+    """A 401 from the proxy reads, to a seal laptop's outbox, as "your station pass was refused" (3.0.1)."""
     front.token[0] = "forged"
     r = front.c.post("/api/bugs", json={"details": "x"})
-    assert r.status_code == 401
+    assert r.status_code == 502 and r.get_json() == {"error": "the reports service refused this app"}
+
+
+def test_the_real_status_and_body_of_a_refusal_go_to_the_log(front, caplog):
+    front.token[0] = "ok:client-stranger"
+    with caplog.at_level("WARNING"):
+        front.c.get("/api/bugs")
+    assert "403" in caplog.text and "caller is not a trusted app" in caplog.text
+
+
+def test_not_signed_in_to_vote_is_still_a_401_through_the_proxy(front):
+    bid = file(front)
+    front.person[0] = {"email": "", "name": ""}
+    assert front.c.post(f"/api/bugs/{bid}/vote").status_code == 401   # the person's, not the app's
+
+
+def test_a_list_is_this_apps_own_reports_unless_it_asks_otherwise(central):
+    s, store, _ = central
+    seal = Front(s.url, app_name="sealviewer")
+    seal.token[0] = "ok:client-seal"
+    plc = Front(s.url)
+    mine = file(seal)
+    theirs = file(plc)
+    ids = lambda r: [b["id"] for b in r.get_json()["bugs"]]            # noqa: E731
+    assert ids(seal.c.get("/api/bugs?status=open&days=365")) == [mine]    # what the open count asks
+    assert ids(plc.c.get("/api/bugs?status=open&days=365")) == [theirs]
+    assert ids(seal.c.get("/api/bugs")) == [mine]
+    assert sorted(ids(seal.c.get("/api/bugs?app=placements"))) == [theirs]  # an explicit app passes as given
+    assert store.get_bug(theirs).app == "placements"
 
 
 def test_x_leap_app_that_disagrees_with_the_token_loses_and_the_response_says_so(central):
