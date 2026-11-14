@@ -22,9 +22,17 @@
     "Changes from v1: `source` -> `app` with `source` reserved; `transitions`",
     "is what the server enforces EXACTLY (with `offered` split out as what the",
     "UI shows); `transcript` moved to optional and must be rendered where it",
-    "exists; `context`/`attachments` recorded as deliberately out of scope."
+    "exists; `context`/`attachments` recorded as deliberately out of scope.",
+    "",
+    "v3, 2026-11-14 — ADDS, removes nothing: one central store for every app's",
+    "reports (design: leap-reports CENTRAL-STORE.md). New fields `product`,",
+    "stored `kind`, `area`, `priority`, `owner`, `parentId`, `duplicateOf`,",
+    "`votes`; `appProducts` (app -> product); PATCH takes the triage fields",
+    "with or without a status change; POST/DELETE /<id>/vote; list filters",
+    "`app`, `kind`, `area`, `priority`. A v2 record (none of the new fields)",
+    "reads back with them null, and `votes` 0."
   ],
-  "version": 2,
+  "version": 3,
 
   "_statuses": [
     "The lifecycle every store shares. LeapHQ ran open|triaged|resolved until",
@@ -140,8 +148,39 @@
     "addedBy",
     "addedAt",
     "actorEmail",
-    "screenshot"
+    "screenshot",
+    "app",
+    "product",
+    "area",
+    "priority",
+    "owner",
+    "parentId",
+    "duplicateOf",
+    "votes"
   ],
+
+  "_v3": [
+    "Added in v3. `app` is stamped by the proxy from the CALLER'S IDENTITY (the",
+    "app's managed identity), never by the filer. `product` is derived from",
+    "`app` by `appProducts`, so it is not stored. `kind` is now stored, and",
+    "still derived from tags when the filer does not say. `area`, `priority`,",
+    "`owner`, `parentId` and `duplicateOf` are TRIAGE fields (null until set);",
+    "setting `duplicateOf` declines the report with the note",
+    "'duplicate of <id>'. `votes` is a count; one vote per signed-in person.",
+    "A v2 record carries none of these: they read back null, `votes` 0."
+  ],
+  "products": ["PikPak", "Seal", "Placement", "Internal"],
+  "appProducts": {
+    "stoppages": "PikPak",
+    "fleet": "PikPak",
+    "report": "PikPak",
+    "placements": "Placement",
+    "sealviewer": "Seal",
+    "leaphq": "Internal"
+  },
+  "priorities": ["now", "next", "later"],
+  "triageFields": ["area", "priority", "owner", "parentId", "duplicateOf"],
+  "listFilters": ["status", "days", "app", "kind", "area", "priority"],
 
   "_detailFields": [
     "What a DETAIL read adds on top of the summary. Every store already keeps",
@@ -200,6 +239,13 @@
     "actorEmail": "ken.moynihan@helloleap.ai",
     "screenshot": true,
     "app": "leaphq",
+    "product": "Internal",
+    "area": "Time entry",
+    "priority": "next",
+    "owner": "ken.moynihan@helloleap.ai",
+    "parentId": null,
+    "duplicateOf": null,
+    "votes": 2,
     "details": "Tapping 7.5 twice leaves the picker open and the value unset.",
     "metaUrl": "https://hq.helloleap.ai/index.html?tab=entry",
     "metaUserAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X)",

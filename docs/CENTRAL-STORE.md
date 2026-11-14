@@ -1,7 +1,7 @@
 # One store for every app's bug and feature reports
 
 **Status:** design, not built. **Decided (Ken, 2026-11-14):** one central store on Postgres (option A), not federation.
-**Assumed, for Ken to confirm in review:**
+**Still assumed (not yet confirmed by Ken):**
 - Product → App → Area as the levels, with products PikPak, Seal, Placement and Internal;
 - feature requests in the same store as bugs, with votes as a field.
 
@@ -20,23 +20,23 @@ The survey behind this is in the hand-over note "bug-feature-reports-across-apps
 
 ```
 browser 🐞 / BugQueue ──► app's /api/bugs ──(proxy)──► leaphq-reports /api/bugs ──► Postgres `reports` db
-agents, MCP tools ─────────────────────────────────► leaphq-reports            (leaphq-pg)
-LeapHQ Review ──────────────────────────────────────► leaphq-reports (one source, not five)
+agents, MCP tools ──(through an app, or as their own app identity)──► leaphq-reports   (leaphq-pg)
+LeapHQ Review ──(LeapHQ's own identity, a token)──► leaphq-reports (one source, not five)
 ```
 
 - **The central service, `leaphq-reports`.**
   - It is the `bug-report-py` blueprint plus a new `PostgresStore`, and nothing else app-specific.
-  - It is its own Container App with internal ingress, reached by people through the gateway at `/reports/`.
+  - It is its own Container App with internal ingress and **no gateway route**: nobody reaches it directly. Every caller is an app, with a token (Ken, 2026-11-14).
   - It is the only place reports are stored, emails are sent and triage rights are checked: one `BUG_ADMINS`, and one sending identity (`leaphq-bug-notify`).
 - **The apps keep their URL.** Each app's `/api/bugs` becomes `create_proxy_blueprint(central_url, app="placements")` from the library.
   - It forwards every route (POST, list, detail, PATCH and screenshot) with its body unchanged.
   - The widget, BugQueue and every page that links to a report keep working, with no front-end change.
   - The app stamps `app`; the caller cannot set it.
-- **Who is asking.** The app calls the service as **its own managed identity** (an Entra token).
-  - It passes the signed-in person, from its own `trusted_person()`, in two headers.
-  - The service believes those headers only from identities on its `TRUSTED_APPS` list (client id → app name), so the app name comes from the token, not the request.
-  - A request through the gateway carries the gateway's principal as today.
-  - This replaces the near-identical `trusted_identity()` / `trusted_person()` / `is_admin()` copies in SV, PIV, seal and the fleet dashboard. `trusted_person()` moves into the library once, for the proxy to use.
+- **Who is asking.** Every request carries a token: the calling app's **own managed identity** (an Entra token). There is no person path on the service, so a request with no token is 401 and the service never reads `X-Ms-Client-Principal` or Tailscale headers.
+  - The app passes the signed-in person, from its own `trusted_person()`, in two headers (`X-Leap-Actor-Email`, `X-Leap-Actor-Name`).
+  - The service verifies the token with **PyJWT** (signature, issuer, audience and expiry: a decode-only check would make every trusted client id spoofable), then believes those headers only from identities on its `TRUSTED_APPS` list (client id → app name). The app name comes from the token, not the request.
+  - **LeapHQ calls as its own identity** like every other app (it is `leaphq` in `TRUSTED_APPS`), not through a gateway route.
+  - This replaces the near-identical `trusted_identity()` / `trusted_person()` / `is_admin()` copies in SV, PIV, seal and the fleet dashboard. `trusted_person()` moves into the library once, for each app's proxy to use behind its own gateway.
 - **Seal laptops.** Their outbox forwards to the seal viewer's proxy exactly as it does today, so nothing changes on a station.
 
 ## Store
@@ -83,7 +83,7 @@ Statuses stay at four. LeapHQ's feature-request `shipped` folds into `resolved`.
 ## Migration (one app at a time; order: seal, PIV, SV, report, fleet, LeapHQ)
 
 For each app:
-1. `tools/import_reports.py <app>` copies its store into `reports`, keeping ids, audit rows and screenshots. It is idempotent, and a re-run copies only what is new.
+1. `tools/import_reports.py <app>` copies its store into `reports`, keeping ids, audit rows, screenshots and votes. **It is one run, at cutover, with the app's writes frozen.** A second run copies nothing: it compares each report already there (status, triage fields, votes, audit length and last audit row) and, if anything differs, raises with the ids that differ and changes nothing.
 2. It checks the counts per status match, and that every imported report reads back equal.
 3. Deploy the app with the proxy. Its old store is kept read-only for 30 days, then deleted (Ken confirms each deletion).
 4. LeapHQ drops that app from its federation list; when the last one goes, so does `plugin-bugs.js`.
@@ -94,7 +94,7 @@ LeapHQ goes last. Its Azure Tables rows (bugs and feature requests) import the s
 
 - Create the managed identity `leaphq-reports` and the database `reports` with that identity as its owner. A one-off script, in the style of `pg-owner-step.sh`, will be written for him to run.
 - Give `leaphq-reports` the ACS sending role (or attach `leaphq-bug-notify` to it).
-- Add `/reports/` to the gateway's routes and apply the excluded paths.
+- Register each app's managed identity (and LeapHQ's) as a trusted client id in `TRUSTED_APPS`, and give the service its Entra audience and issuer. There is no gateway route to add.
 - Approve each old store's deletion after its 30 days.
 
 ## Not doing

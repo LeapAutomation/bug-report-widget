@@ -86,7 +86,51 @@ def is_closed(status: str) -> bool:
     return (status or "open").lower() in CLOSED_STATUSES
 
 
+def effective_kind(kind, tags) -> str:
+    """The stored kind when it is a declared one, else derived from the tags."""
+    return kind if kind in KINDS else kind_from_tags(tags)
+
+
 def with_kind(payload: dict) -> dict:
-    """Stamp `kind` onto a wire payload. Idempotent."""
-    payload["kind"] = kind_from_tags(payload.get("tags"))
+    """Stamp `kind` onto a wire payload: the kind it already carries when that
+    is a declared one (v3 stores it), else derived from its tags. Idempotent."""
+    payload["kind"] = effective_kind(payload.get("kind"), payload.get("tags"))
     return payload
+
+
+# --- v3 (2026-11-14) ---------------------------------------------------------
+# Mirrors report-contract.json `products`, `appProducts`, `priorities`,
+# `triageFields`, `listFilters`; tests/test_contract.py fails if they drift.
+
+PRODUCTS = ("PikPak", "Seal", "Placement", "Internal")
+
+#: app -> product. `product` is DERIVED from `app` by this table, never stored.
+APP_PRODUCTS = {
+    "stoppages": "PikPak",
+    "fleet": "PikPak",
+    "report": "PikPak",
+    "placements": "Placement",
+    "sealviewer": "Seal",
+    "leaphq": "Internal",
+}
+
+PRIORITIES = ("now", "next", "later")
+
+#: What PATCH may set besides the status: wire name -> the record's attribute. The ONE map;
+#: everything else (the blueprint, the stores, audit notes) derives from it.
+TRIAGE_WIRE_TO_ATTR = {
+    "area": "area",
+    "priority": "priority",
+    "owner": "owner",
+    "parentId": "parent_id",
+    "duplicateOf": "duplicate_of",
+}
+TRIAGE_ATTR_TO_WIRE = {a: w for w, a in TRIAGE_WIRE_TO_ATTR.items()}
+TRIAGE_FIELDS = tuple(TRIAGE_WIRE_TO_ATTR)
+
+LIST_FILTERS = ("status", "days", "app", "kind", "area", "priority")
+
+
+def product_for_app(app):
+    """The product an app belongs to, or None for no / an unknown app."""
+    return APP_PRODUCTS.get(app) if app else None

@@ -1,6 +1,6 @@
 [project]
 name = "bug-report-py"
-version = "2.2.0"
+version = "3.0.0"
 description = "Flask blueprint + storage interface implementing the bug-report-widget API spec."
 readme = "README.md"
 license = { text = "MIT" }
@@ -11,9 +11,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.1"]
 email = ["azure-communication-email>=1.0", "azure-identity>=1.15"]
 test = [
     "pytest>=7.0",
+    "psycopg[binary]>=3.1",
 ]
 
 [build-system]

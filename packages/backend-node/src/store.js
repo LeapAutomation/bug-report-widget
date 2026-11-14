@@ -15,6 +15,7 @@
 import { mkdir, readFile, readdir, writeFile, unlink, appendFile, open, rename, stat } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
+import { APP_PRODUCTS, KINDS, kindFromTags } from "./models.js";
 
 export class StoreError extends Error {}
 export class NotFound extends StoreError {}
@@ -36,6 +37,15 @@ export function makeBugRecord(o) {
     metaBuildSha: o.metaBuildSha || "",
     screenshot: !!o.screenshot,
     transcript: o.transcript || null,
+    // contract v3: null / empty on a record written before it
+    app: o.app || null,
+    kind: KINDS.includes(o.kind) ? o.kind : null,
+    area: o.area || null,
+    priority: o.priority || null,
+    owner: o.owner || null,
+    parentId: o.parentId || null,
+    duplicateOf: o.duplicateOf || null,
+    votes: Array.isArray(o.votes) ? o.votes : [],   // [{ voter, at }]
   };
 }
 
@@ -50,7 +60,32 @@ export function toBugSummary(rec) {
     actorName: rec.actorName || "",
     addedAt: rec.addedAt,
     screenshot: !!rec.screenshot,
+    kind: KINDS.includes(rec.kind) ? rec.kind : kindFromTags(rec.tags),
+    app: rec.app || null,
+    product: (rec.app && APP_PRODUCTS[rec.app]) || null,
+    area: rec.area || null,
+    priority: rec.priority || null,
+    owner: rec.owner || null,
+    parentId: rec.parentId || null,
+    duplicateOf: rec.duplicateOf || null,
+    votes: (rec.votes || []).length,
   };
+}
+
+const TRIAGE_ATTRS = ["area", "priority", "owner", "parentId", "duplicateOf"];
+
+/** Apply triage changes / a vote to a record in place (shared by both stores). */
+export function applyChanges(rec, changes) {
+  for (const [k, v] of Object.entries(changes)) {
+    if (!TRIAGE_ATTRS.includes(k)) throw new StoreError(`not a triage field: ${k}`);
+    rec[k] = v;
+  }
+}
+export function toggleVote(rec, voter, adding) {
+  const v = String(voter).trim().toLowerCase();
+  const has = rec.votes.some(x => x.voter === v);
+  if (adding && !has) rec.votes.push({ voter: v, at: new Date().toISOString() });
+  if (!adding && has) rec.votes = rec.votes.filter(x => x.voter !== v);
 }
 
 export function toBugFull(rec) {
@@ -95,6 +130,16 @@ export class InMemoryStore {
     const r = await this.getBug(id);
     r.status = newStatus;
     return r;
+  }
+  async updateFields(id, changes) {
+    const r = await this.getBug(id);
+    applyChanges(r, changes);
+    return r;
+  }
+  async setVote(id, voter, adding) {
+    const r = await this.getBug(id);
+    toggleVote(r, voter, adding);
+    return r.votes.length;
   }
   async appendAudit(id, entry) {
     if (!this._audits.has(id)) this._audits.set(id, []);
@@ -169,6 +214,9 @@ export class FilesystemStore {
     this.root = root;
     this._readAttempts = readAttempts;
     this._ready = mkdir(root, { recursive: true }).then(() => this._sweepStaleTemps());
+    // Nobody may ever await this (a store built and dropped, e.g. a test whose request never reaches it):
+    // mark it handled so a directory removed in the meantime is not an unhandledRejection. Callers that DO await it still see the error.
+    this._ready.catch(() => {});
   }
   // A crash between creating a temp file and the rename leaves it behind.
   async _sweepStaleTemps() {
@@ -213,6 +261,18 @@ export class FilesystemStore {
     rec.status = newStatus;
     await atomicWrite(this._path(rec.id, ".json"), JSON.stringify(rec, null, 2));
     return rec;
+  }
+  async updateFields(id, changes) {
+    const rec = await this.getBug(id);
+    applyChanges(rec, changes);
+    await atomicWrite(this._path(rec.id, ".json"), JSON.stringify(rec, null, 2));
+    return rec;
+  }
+  async setVote(id, voter, adding) {
+    const rec = await this.getBug(id);
+    toggleVote(rec, voter, adding);
+    await atomicWrite(this._path(rec.id, ".json"), JSON.stringify(rec, null, 2));
+    return rec.votes.length;
   }
   async appendAudit(id, entry) {
     await appendFile(this._path(id, ".audit.jsonl"), JSON.stringify(entry) + "\n");

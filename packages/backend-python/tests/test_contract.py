@@ -89,3 +89,40 @@ def test_closed_is_defined_by_exclusion():
 def test_with_kind_is_idempotent():
     payload = {"tags": ["bug", "feature-request"]}
     assert contract.with_kind(contract.with_kind(payload))["kind"] == "feature"
+
+
+# ---- v3 (2026-11-14) -------------------------------------------------------
+
+def test_the_v3_mirror_matches_the_spec():
+    assert SPEC["version"] == 3
+    assert list(contract.PRODUCTS) == SPEC["products"]
+    assert dict(contract.APP_PRODUCTS) == SPEC["appProducts"]
+    assert list(contract.PRIORITIES) == SPEC["priorities"]
+    assert list(contract.TRIAGE_FIELDS) == SPEC["triageFields"]
+    assert list(contract.LIST_FILTERS) == SPEC["listFilters"]
+
+
+def test_every_app_maps_to_a_declared_product():
+    assert set(SPEC["appProducts"].values()) <= set(SPEC["products"])
+    assert SPEC["appProducts"] == {"stoppages": "PikPak", "fleet": "PikPak", "report": "PikPak",
+                                   "placements": "Placement", "sealviewer": "Seal", "leaphq": "Internal"}
+    assert contract.product_for_app("nope") is None and contract.product_for_app(None) is None
+
+
+def test_v3_only_adds_to_v2():
+    # nothing a v2 reader relied on is gone
+    for k in ("id", "title", "kind", "tags", "status", "addedBy", "addedAt", "actorEmail", "screenshot"):
+        assert k in SPEC["summaryFields"]
+    for k in ("details", "metaUrl", "metaUserAgent", "metaBuildSha", "audit"):
+        assert k in SPEC["detailFields"]
+    assert SPEC["statuses"] == ["open", "triaged", "resolved", "declined"]
+    assert SPEC["transitions"]["open"] == ["triaged", "declined"]
+    for k in ("app", "product", "area", "priority", "owner", "parentId", "duplicateOf", "votes"):
+        assert k in SPEC["summaryFields"] and k in SPEC["example"]
+
+
+def test_a_stored_kind_beats_the_tags_and_an_undeclared_kind_does_not():
+    assert contract.effective_kind("feature", ["bug"]) == "feature"
+    assert contract.effective_kind("capability", ["feature"]) == "feature"   # not a kind: fall back to the tags
+    assert contract.effective_kind(None, []) == "bug"
+    assert contract.with_kind({"kind": "feature", "tags": ["bug"]})["kind"] == "feature"

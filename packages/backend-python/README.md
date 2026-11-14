@@ -1,6 +1,6 @@
 # `bug-report-py` — Python backend
 
-Flask blueprint implementing the [bug-report API spec](../spec/openapi.yaml). Pluggable storage; two reference implementations ship in the box.
+Flask blueprint implementing the [bug-report API spec](../spec/openapi.yaml). Pluggable storage; file, in-memory and PostgreSQL stores ship in the box. Version 3 adds the central-store pieces: triage fields, votes, `PostgresStore`, the proxy, the service-side trust helper and `import_reports` (sections below).
 
 ## Install
 
@@ -37,6 +37,112 @@ Routes mounted (under the prefix you pass):
 | GET    | /bugs/{id}                 | open            |
 | PATCH  | /bugs/{id}                 | `is_admin`      |
 | GET    | /bugs/{id}/screenshot      | open            |
+| POST   | /bugs/{id}/vote            | signed in (3.0.0) |
+| DELETE | /bugs/{id}/vote            | signed in (3.0.0) |
+
+## Triage fields, votes and filters (3.0.0)
+
+`PATCH /bugs/{id}` takes `area`, `priority` (`now|next|later`), `owner` (an email), `parentId` and `duplicateOf`
+with or without a `status` (a null or empty value clears a field). Each change writes an audit row whose note says
+what changed (`area: none -> Cutter; priority: none -> now`); a value equal to the current one writes nothing.
+`duplicateOf` also declines the report with the note `duplicate of <id>`. A `parentId` that would make a cycle is 400.
+
+`POST /bugs/{id}/vote` and `DELETE /bugs/{id}/vote` need only a signed-in caller (the `actor_identity` email; without
+that hook, the body's `actorEmail`), one vote per person, case-insensitively. `GET /bugs` filters by `app`, `kind`,
+`area` and `priority` as well as `status` and `days`. Every summary carries `kind`, `app`, `product`, `area`,
+`priority`, `owner`, `parentId`, `duplicateOf` and `votes`; a record written before v3 has them null and `votes` 0.
+`create_blueprint(app_stamp=lambda req: "placements")` stamps the app a report is filed under (the body's `app` is
+never read); `guard=` refuses a request before any route runs.
+
+## PostgresStore (3.0.0)
+
+```python
+# pip install "bug-report-py[postgres]"     # psycopg 3
+import psycopg
+from bug_report import create_blueprint
+from bug_report.pg import PostgresStore
+
+store = PostgresStore(lambda: psycopg.connect(dsn))   # a connection factory: one per operation
+store.ensure_schema()                                  # idempotent: reports, report_audit, report_votes
+create_blueprint(store=store, ...)
+```
+
+The factory is called for every operation and the connection used as a context manager (commit, then close), so a
+service whose password is a short-lived Entra token passes a factory that fetches a fresh one; a pool's
+`pool.connection` works too. The `record` jsonb column holds what `FilesystemStore` writes (the same JSON, key for key;
+jsonb does not keep key order or whitespace); `app`, `kind`, `status`, `added_at`, `area`, `priority`, `owner`,
+`parent_id` and `duplicate_of` are copies lifted out for the list filters, and `kind` there is the effective kind
+(stored, else derived from the tags). `since` is filtered on the `added_at` column. `update_bug` (what PATCH calls) is one
+transaction: `SELECT ... FOR UPDATE` on the row, then one UPDATE, so two PATCHes of different fields both land.
+Database errors surface as `StoreError`.
+
+## Moving an app's reports into the central store (3.0.0)
+
+```python
+from bug_report import FilesystemStore, ImportMismatch, import_reports
+from bug_report.pg import PostgresStore
+
+counts = import_reports(FilesystemStore("/data/bugs"), PostgresStore(connect), app="placements")
+# {"copied": {"open": 12, "declined": 3}, "skipped": {}, "audit": 41, "screenshots": 9, "votes": 0}
+```
+
+**One run, at cutover, with the app's writes frozen.** It keeps ids, audit rows, screenshots and votes; a report that has
+no `app` gets this one, which must be in `contract.APP_PRODUCTS` (else `ValueError`, nothing touched). A second run over
+a finished import copies nothing (those reports are counted under `skipped`). It first compares every report already
+in the destination with the source (status, triage fields, votes, audit length and last audit row); if any differs it raises
+`ImportMismatch` with `.ids` and writes nothing, so a source edited after the first run is noticed, not half-merged.
+There is no resume: a run that died half-way shows up as differing ids on the next.
+
+## An app's `/api/bugs` as a proxy to the central service (3.0.0)
+
+```python
+from bug_report import create_proxy_blueprint
+from bug_report.identity import person_provider
+
+app.register_blueprint(create_proxy_blueprint(
+    central_url="https://leaphq-reports.internal/api/bugs",
+    app="placements",
+    token_provider=lambda: credential.get_token(SCOPE).token,        # the app's own managed identity
+    person_provider=person_provider(trust_easyauth=True),            # the signed-in person
+), url_prefix="/api")
+```
+
+Every route (POST, list, detail, PATCH, vote, screenshot) is forwarded with its method, query, body and content type,
+and the service's status, body, content type and `Location` come back unchanged (a 302 to a signed screenshot URL is
+not followed). Each forwarded request carries `Authorization: Bearer <token_provider()>`, `X-Leap-Actor-Email` and
+`X-Leap-Actor-Name` (percent-encoded) from `person_provider()`, and `X-Leap-App: <app>`; the browser's own
+`Authorization` and `X-Leap-*` headers are dropped. A `..` path segment is refused (400). A service that cannot be reached is a 502, and a token or identity that cannot be
+produced is a 502 with nothing sent; the 502 bodies are generic (the reason goes to the log, not the browser). Standard library only (urllib).
+
+## The service side: who is calling (3.0.0)
+
+```python
+from bug_report import TrustedCallers, create_blueprint
+
+callers = TrustedCallers(
+    trusted_apps={"<placements client id>": "placements", "<seal client id>": "sealviewer"},
+    verify_token=verify_entra_token,          # YOURS: raw bearer token -> claims dict, or raise. No JWT code here.
+)
+create_blueprint(store=store, actor_identity=callers.actor_identity, app_stamp=callers.app_stamp,
+                 guard=callers.guard, is_admin=callers.is_admin_in(BUG_ADMINS))
+```
+
+**`verify_token` must check the signature, the issuer, the audience and the expiry.** A verifier that only decodes the
+token makes every trusted client id spoofable: anyone can write `azp` into a token they made up. (The service uses PyJWT
+with the tenant's signing keys; this library has no JWT dependency, by design.)
+
+**Every request needs a valid app token; there is no person path** (Ken, 2026-11-14). `trusted_caller(request,
+trusted_apps, verify_token)` is the function underneath. No bearer token is 401, and the service never reads
+`X-Ms-Client-Principal` or Tailscale headers, whatever else the request carries. A verifier that raises or returns no claims
+is 401; a token whose `azp` or `appid` claim is not in `trusted_apps` is 403; neither falls back to anything. Only behind a
+good token from a trusted app are `X-Leap-Actor-Email` / `-Name` believed, and `app` is the mapped name. A disagreeing
+`X-Leap-App` is ignored, and the response says which won: `X-Leap-App-Used` and `X-Leap-App-Ignored` headers, `app` and
+`appIgnored` in the POST body.
+
+`bug_report.identity` holds the person logic for an APP behind its own gateway (its `trusted_person()`, handed to
+`create_proxy_blueprint`): `trusted_person`, `trusted_identity`, `entra_claims`, `env_flag`. `trust_easyauth=True` believes
+EasyAuth's `X-Ms-Client-Principal`; `loopback_headers=True` (off by default) believes Tailscale Serve's headers from a
+loopback peer only. Nothing reads the environment for you. The central service does not use any of this.
 
 ## Emailing the reporter on close (2.2.0)
 
@@ -66,9 +172,10 @@ Open-by-default for POST and single-bug GET is deliberate: any user (or agent) c
 | Class | Purpose |
 |---|---|
 | `InMemoryStore` | Tests, dev. Dict-backed; lost on process restart. |
-| `FilesystemStore(root)` | Single-host production. One JSON per bug + audit JSONL + PNG. What `claude-tmux-dashboard` runs in production. |
+| `FilesystemStore(root)` | Single-host production. One JSON per bug + audit JSONL + votes JSONL + PNG. What `claude-tmux-dashboard` runs in production. |
+| `bug_report.pg.PostgresStore(connect)` | The central store (3.0.0); see above. Needs `bug-report-py[postgres]`. |
 
-To plug in another backend (SQLite, Postgres, S3, …) implement the `Store` protocol — see [`bug_report/store.py`](bug_report/store.py). The blueprint depends on the protocol only.
+To plug in another backend (SQLite, S3, …) implement the `Store` protocol — see [`bug_report/store.py`](bug_report/store.py). The blueprint depends on the protocol only.
 
 ## Tests
 
@@ -78,7 +185,9 @@ pip install -e ".[test]"
 pytest
 ```
 
-The suite is parametrized over both built-in stores, so the same 21 scenarios run twice — 42 tests total. Any new `Store` implementation should be added to the `store` fixture and will be exercised by the same contract.
+The blueprint suite runs against every store (in-memory, filesystem, PostgreSQL). Any new `Store` implementation should be added to the `store` fixture in `test_blueprint.py` and the `any_store` fixture in `tests/conftest.py` and will be exercised by the same contract.
+
+The PostgreSQL tests use a real server: set `BUG_REPORT_PG_DSN` (a server you can create schemas on; each test gets its own schema), or have Homebrew's `postgresql@16` installed and a throwaway one is started on a free port in a temp directory. With neither, they skip and say why; under `CI=true` a missing Postgres fails instead.
 
 ## Invariants enforced
 

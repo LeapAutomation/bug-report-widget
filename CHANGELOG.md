@@ -2,6 +2,44 @@
 
 All notable changes to this monorepo.
 
+## backends v3.0.0 — 2026-11-14 (`bug-report-py` 3.0.0)
+
+One central store for every app's reports (design: `CENTRAL-STORE.md`). The Python library only; nothing is
+deployed by this change. Contract v3 adds to v2 and removes nothing: a v2 record, and a v2 client, work as before.
+
+- **Contract v3** (`report-contract.json`, `contract.py`, `types.py`, `types.ts`, `openapi.yaml`): `product`,
+  stored `kind`, `area`, `priority` (`now|next|later`), `owner`, `parentId`, `duplicateOf` and `votes` on every
+  summary; `appProducts` maps app to product (stoppages, fleet, report: PikPak; placements: Placement;
+  sealviewer: Seal; leaphq: Internal). A v2 record reads back with the new fields null and `votes` 0.
+- **PATCH takes the triage fields**, with or without a status change (`status` is optional when one is sent).
+  Each change writes an audit row whose note says what changed. `duplicateOf` also declines the report with the
+  note `duplicate of <id>`. `parentId` may not make a cycle.
+- **Votes:** `POST /bugs/{id}/vote` (any signed-in caller, one vote per person) and `DELETE`.
+- **List filters:** `app`, `kind`, `area`, `priority`.
+- **`bug_report.pg.PostgresStore`** (extra: `bug-report-py[postgres]`, psycopg 3), ported from the fleet
+  dashboard's store: `reports`, `report_audit`, `report_votes`; `record` jsonb is what `FilesystemStore` writes;
+  `ensure_schema()`; the constructor takes a connection factory (so a service can pass an Entra-token password).
+  The `Store` protocol gains `update_fields`, `add_vote`, `remove_vote`, `vote_counts`, `list_votes` and the
+  filter arguments to `list_bugs`; both file stores, `InMemoryStore` and `PostgresStore` implement them.
+- **`import_reports(src, dst, app)`**: one run, at cutover, with the app's writes frozen. Keeps ids, audit, screenshots
+  and votes; `app` must be in `APP_PRODUCTS`. A second run copies nothing; if a report already there differs from the
+  source (status, triage fields, votes, audit length and last row) it raises `ImportMismatch` with the ids and writes nothing.
+- **`create_proxy_blueprint(central_url, app, token_provider, person_provider)`**: an app's `/api/bugs` that
+  forwards every route to the central service as the app's own identity, naming the signed-in person in headers.
+  Refuses `..` path segments; its 502 bodies carry no exception text.
+- **`TrustedCallers` / `trusted_caller(request, trusted_apps, verify_token)`**: the service side, with NO person path:
+  every request needs a bearer token (401 without; 403 from an untrusted app); the actor headers are believed only behind a
+  verified token from a trusted app. `verify_token` (the service's, PyJWT) must check signature, issuer, audience and expiry.
+- **`bug_report.identity`**: `trusted_person` / `trusted_identity` moved in from the apps, for an app's own proxy; configured by
+  arguments (`trust_easyauth`, `loopback_headers`, default off) rather than environment reads.
+- **Concurrent PATCHes** of different fields of one report both land: `Store.update_bug` is one atomic step
+  (`PostgresStore`: `SELECT ... FOR UPDATE` then one UPDATE; `FilesystemStore`: a lock per report).
+- **`create_blueprint`** gains `app_stamp` and `guard`; the POST response carries `app`.
+- **Node backend** (`backend-node`): the same v3 fields, PATCH triage, filters and votes, minimal (file and
+  in-memory stores; the Azure Tables store does not keep them yet and answers 501).
+- **Tests:** a real PostgreSQL (`BUG_REPORT_PG_DSN`, else a throwaway Homebrew one) for the store, the
+  blueprint suite and the e2e suite; CI adds a `postgres:16` service and a missing Postgres fails there.
+
 ## Ownership — 2026-11-04
 
 - The repository moved from `kmoy007/bug-report-widget` to `LeapAutomation/bug-report-widget`; GitHub

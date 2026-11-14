@@ -8,6 +8,25 @@ export const BUG_SCREENSHOT_MAX = 5 * 1024 * 1024;  // 5 MB decoded
 
 export const BUG_STATUSES = ["open", "triaged", "resolved", "declined"];
 
+// Contract v3 (report-contract.json; tests/contract-drift.test.js keeps these in step).
+export const KINDS = ["bug", "feature"];
+export const KIND_TAGS = {
+  feature: ["feature", "feature-request", "capability", "capability-request"],
+  bug: ["bug", "bug-request"],
+};
+export const PRIORITIES = ["now", "next", "later"];
+export const APP_PRODUCTS = {
+  stoppages: "PikPak", fleet: "PikPak", report: "PikPak",
+  placements: "Placement", sealviewer: "Seal", leaphq: "Internal",
+};
+export const TRIAGE_FIELDS = ["area", "priority", "owner", "parentId", "duplicateOf"];
+
+/** The kind a report is, from its tags: a feature tag outranks `bug`. */
+export function kindFromTags(tags) {
+  const norm = new Set((tags || []).map(t => String(t).trim().toLowerCase()));
+  return KIND_TAGS.feature.some(t => norm.has(t)) ? "feature" : "bug";
+}
+
 // The widget serialises PNG when it fits and falls back down a JPEG ladder when
 // the capture would otherwise blow the cap above — so "the screenshot" is not
 // always a PNG, and on an image-heavy page it usually is not. Serving every one

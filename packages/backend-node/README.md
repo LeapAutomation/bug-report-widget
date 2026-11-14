@@ -103,3 +103,12 @@ npm test
 ## Invariants enforced
 
 Identical to the Python side — see the same list at [`../backend-python/README.md`](../backend-python/README.md#invariants-enforced). If a behavior differs between the two backends, that's a spec bug or a contract-test gap; the cross-stack suite in [`../../e2e`](../../e2e) hunts these.
+
+## Contract v3 (backends 3.0.0)
+
+The router stores and echoes the v3 fields (`kind`, `app`, `product`, `area`, `priority`, `owner`, `parentId`,
+`duplicateOf`, `votes`), takes them on `PATCH` (audit row per change; `duplicateOf` declines with the note
+`duplicate of <id>`), filters the list by `app`, `kind`, `area` and `priority`, and serves `POST`/`DELETE /:id/vote`.
+Options: `appStamp(req)` (the app a report is filed under; the body's `app` is never read) and `actorIdentity(req)`
+(the signed-in email, who votes). `FilesystemStore` and `InMemoryStore` keep them; the Azure Tables store does not yet
+and the router answers 501 for triage fields and votes on it. The Python library is the reference for the central store.

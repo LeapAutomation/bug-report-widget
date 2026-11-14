@@ -49,6 +49,17 @@ The field names are the ones the implementations already spoke, not the
 ones any single one of them used internally — `screenshot` is a boolean
 ("is there one"), because that is what every backend here emits.
 
+## Contract v3: one central store (backends 3.0.0)
+
+Additive; a v2 record and a v2 client work unchanged. See `report-contract.json` (`_v3`, `appProducts`, `priorities`,
+`triageFields`, `listFilters`) and the PATCH/vote sections of `openapi.yaml`.
+
+- `product`, stored `kind`, `area`, `priority`, `owner`, `parentId`, `duplicateOf`, `votes` on every summary; null (and 0 votes) on a v2 record.
+- `app` is stamped from the caller's identity, never the body; `product` is derived from it by `appProducts`.
+- `PATCH` takes the triage fields with or without `status`; each change writes an audit row saying what changed; `duplicateOf` also declines with the note `duplicate of <id>`.
+- `POST` / `DELETE /bugs/{id}/vote`: any signed-in caller, one vote per person.
+- `GET /bugs` filters `app`, `kind`, `area`, `priority`.
+
 ## People are named; closing can email the reporter (backends 2.2.0)
 
 All additive and optional, so older data and older clients keep working:

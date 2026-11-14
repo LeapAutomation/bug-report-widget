@@ -5,6 +5,10 @@
  */
 
 export type Status = "open" | "triaged" | "resolved" | "declined";
+export type Kind = "bug" | "feature";
+export type Priority = "now" | "next" | "later";
+export type Product = "PikPak" | "Seal" | "Placement" | "Internal";
+export type App = "stoppages" | "fleet" | "report" | "placements" | "sealviewer" | "leaphq";
 
 export interface TranscriptTurn {
   ts?: string;
@@ -32,6 +36,8 @@ export interface BugCreate {
   /** Idempotency key (widget 1.6.0+, opt-in): the same on every retry of one report. ≤ 64 chars. */
   clientKey?: string;
   transcript?: TranscriptTurn[];
+  /** Stored when given; derived from `tags` when not (contract v3). */
+  kind?: Kind;
 }
 
 export interface BugSummary {
@@ -45,6 +51,19 @@ export interface BugSummary {
   actorName?: string;
   addedAt: string;
   screenshot: boolean;
+  /** Contract v3 (backends 3.0.0). A v2 record reads back with these null and `votes` 0. */
+  kind?: Kind;
+  /** Stamped by the proxy from the caller's identity. */
+  app?: App | null;
+  /** Derived from `app` (report-contract.json appProducts). */
+  product?: Product | null;
+  area?: string | null;
+  priority?: Priority | null;
+  /** An email. */
+  owner?: string | null;
+  parentId?: string | null;
+  duplicateOf?: string | null;
+  votes?: number;
 }
 
 export interface AuditEntry {
@@ -76,9 +95,30 @@ export interface Notified {
   error?: string;
 }
 
+/** POST/DELETE /bugs/{id}/vote response (backends 3.0.0). */
+export interface Voted {
+  votes: number;
+  voted: boolean;
+}
+
+/** POST /bugs 201 body. `app` is the app the report was filed under (backends 3.0.0). */
+export interface BugCreated {
+  id: string;
+  app: App | null;
+  /** The X-Leap-App a trusted app sent that lost to its token. */
+  appIgnored?: string;
+}
+
 /** PATCH /bugs/{id} body. `notify` emails the reporter on a change to resolved/declined and needs `note`. */
 export interface BugPatch {
-  status: Status;
+  /** Required unless a triage field is sent (backends 3.0.0). */
+  status?: Status;
+  /** Triage fields (3.0.0); null or "" clears. `duplicateOf` also declines: note "duplicate of <id>". */
+  area?: string | null;
+  priority?: Priority | null;
+  owner?: string | null;
+  parentId?: string | null;
+  duplicateOf?: string | null;
   note?: string;
   changedBy?: string;
   changedByName?: string;

@@ -34,10 +34,12 @@ TINY_JPEG = bytes.fromhex("FFD8FFE000104A46494600010100000100010000FFD9")
 TINY_JPEG_B64 = base64.b64encode(TINY_JPEG).decode()
 
 
-@pytest.fixture(params=["memory", "filesystem"])
+@pytest.fixture(params=["memory", "filesystem", "postgres"])
 def store(request, tmp_path):
     if request.param == "memory":
         return InMemoryStore()
+    if request.param == "postgres":
+        return request.getfixturevalue("pg_store")
     return FilesystemStore(tmp_path / "bugs")
 
 
