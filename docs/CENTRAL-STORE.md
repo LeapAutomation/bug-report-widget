@@ -1,7 +1,12 @@
 # One store for every app's bug and feature reports
 
-**Status:** design, not built. **Decided (Ken, 2026-11-14):** one central store on Postgres (option A), not federation.
-**Still assumed (not yet confirmed by Ken):**
+**Status:** being built.
+- Library `backends-v3.0.0` shipped.
+- Service `LeapAutomation/leap-reports` deployed 2026-11-14.
+- Seal moves first.
+
+**Decided (Ken, 2026-11-14):**
+- one central store on Postgres (option A), not federation;
 - Product → App → Area as the levels, with products PikPak, Seal, Placement and Internal;
 - feature requests in the same store as bugs, with votes as a field.
 
