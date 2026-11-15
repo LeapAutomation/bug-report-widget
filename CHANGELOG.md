@@ -2,6 +2,18 @@
 
 All notable changes to this monorepo.
 
+## backends v3.1.0 - 2026-11-15 (`bug-report-py` 3.1.0)
+
+The proxy's core is a plain function. No contract change.
+
+- **`bug_report.proxy.forward(method, rest, query, body, browser_headers, *, central_url, app, token_provider, person_provider, timeout=30)`**
+  returns `(status, body_bytes, headers_dict)` and uses no web framework, so an app on the standard-library `http.server`
+  (the daily report) can proxy to the central store. It carries every rule `create_proxy_blueprint` had: `..` and `\` are 400;
+  a list defaults to `app=<app>`; only `Content-Type` and `Accept` come from the browser; the bearer token and `X-Leap-*` headers
+  are added; a marked trust refusal and a short body are 502; `http.client` with no `Connection: close`; generic 502 bodies; only
+  the contract's response headers come back.
+- `create_proxy_blueprint` is now a thin Flask wrapper over `forward` (Flask is imported inside it). Its behaviour and tests are unchanged.
+
 ## backends v3.0.2 — 2026-11-15 (`bug-report-py` 3.0.2)
 
 One fix to `create_proxy_blueprint`, found on the seal viewer's first live day. No contract change.
