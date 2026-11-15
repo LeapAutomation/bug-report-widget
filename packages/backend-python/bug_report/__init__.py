@@ -21,7 +21,7 @@ in ../../e2e enforce that this and the Node backend stay honest.
 
 from .blueprint import create_blueprint
 from .importer import ImportMismatch, import_reports
-from .proxy import create_proxy_blueprint
+from .proxy import create_proxy_blueprint, forward
 from .trust import Caller, TrustedCallers, trusted_caller
 from . import identity
 from .email import AcsNotifier, Notice, render
@@ -44,7 +44,7 @@ from .models import (
     valid_bug_id,
 )
 
-__version__ = "3.0.1"
+__version__ = "3.1.0"
 
 from . import contract
 from .contract import (

@@ -10,6 +10,10 @@
         person_provider=person_provider(trust_easyauth=True),
     ), url_prefix="/api")
 
+The core is ``forward()`` (3.1.0), a plain function with no web framework in it, for an app that
+is not Flask - the daily report's standard-library ``http.server`` calls it directly. The blueprint
+below is a thin Flask wrapper over it, so the rules live once.
+
 Every route (POST, list, detail, PATCH, vote, screenshot) is forwarded with
 its method, query, body and content type, and the service's status code, body
 and content type come back unchanged. Each forwarded request carries
@@ -33,10 +37,8 @@ from __future__ import annotations
 import http.client
 import json
 import logging
-from typing import Callable
-from urllib.parse import quote, urlsplit
-
-from flask import Blueprint, Response, request
+from typing import Callable, Mapping
+from urllib.parse import quote, unquote, urlsplit
 
 from .trust import TRUST_REFUSAL_HEADER
 
@@ -47,6 +49,99 @@ log = logging.getLogger(__name__)
 _FORWARD = ("Content-Type", "Accept")
 #: response headers passed back: the contract's, plus the redirect target
 _BACK = ("Content-Type", "Location", "Cache-Control", "X-Leap-App-Used", "X-Leap-App-Ignored")
+#: methods that carry a body to the service
+_WITH_BODY = ("POST", "PATCH", "DELETE")
+
+
+def _target(central_url: str):
+    base = central_url.rstrip("/")
+    target = urlsplit(base)
+    if target.scheme not in ("http", "https") or not target.hostname:
+        raise ValueError(f"central_url must be an http(s) URL: {central_url!r}")
+    return target
+
+
+def _ascii(v: str) -> str:
+    return quote(v or "", safe=" @.+-_'")
+
+
+def _err(status: int, message: str) -> tuple[int, bytes, dict]:
+    return status, json.dumps({"error": message}).encode(), {"Content-Type": "application/json"}
+
+
+def forward(
+    method: str,
+    rest: str,
+    query: str,
+    body: bytes | None,
+    browser_headers: Mapping[str, str],
+    *,
+    central_url: str,
+    app: str,
+    token_provider: Callable[[], str],
+    person_provider: Callable[[], dict | None],
+    timeout: float = 30,
+) -> tuple[int, bytes, dict]:
+    """Forward one ``/bugs`` request to the central service; return ``(status, body, headers)``.
+
+    ``rest`` is the path after ``/bugs`` ("" for the collection, "<id>", "<id>/vote", ...), in either form:
+    raw from the request line (``a%20b``, ``%2e%2e``) or already decoded (Flask's). It is percent-decoded once,
+    checked for ``..``, ``.`` and ``\\`` segments (400, nothing sent), and each segment re-quoted going out. ``query``
+    the raw query string without the "?", ``body`` the request body (sent for POST, PATCH and DELETE
+    only), ``browser_headers`` the browser's request headers (only Content-Type and Accept are taken,
+    any case). Never raises for a service or network problem: those are 502s.
+    """
+    target = _target(central_url)
+    method = method.upper()
+    # `rest` may be percent-encoded or already decoded (Flask hands over a decoded one): it is decoded here, once,
+    # BEFORE the dot-dot and backslash refusal, so `%2e%2e` and `%5c` are refused whichever way the caller got
+    # it, and each segment is re-quoted for the outgoing path.
+    segments = unquote(rest).split("/") if rest else []
+    if any(seg in ("..", ".") or "\\" in seg for seg in segments):
+        return _err(400, "invalid path")
+    path = target.path.rstrip("/") + "".join("/" + quote(seg, safe="") for seg in segments)
+    # The list is this app's own reports unless the caller says otherwise (3.0.1): the open count and
+    # the queue must not show every app's, which is what the service gives a trusted app with no filter.
+    if method == "GET" and not rest and "app" not in {p.split("=", 1)[0] for p in query.split("&") if p}:
+        query = (query + "&" if query else "") + "app=" + quote(app, safe="")
+    if query:
+        path += "?" + query
+    try:
+        person = person_provider() or {}
+        lowered = {k.lower(): v for k, v in browser_headers.items()}
+        headers = {h: lowered[h.lower()] for h in _FORWARD if h.lower() in lowered}
+        headers.update({
+            "Authorization": f"Bearer {token_provider()}",
+            "X-Leap-Actor-Email": _ascii(person.get("email", "")),
+            "X-Leap-Actor-Name": _ascii(person.get("name", "")),
+            "X-Leap-App": app,
+        })
+    except Exception as e:  # noqa: BLE001 - no token / identity: say so, do not guess
+        log.warning("reports proxy (%s): could not get a token or identity: %s", app, e)
+        return _err(502, "could not authenticate to the reports service")
+    data = body if method in _WITH_BODY else None
+    connection = http.client.HTTPSConnection if target.scheme == "https" else http.client.HTTPConnection
+    conn = connection(target.hostname, target.port, timeout=timeout)
+    try:
+        # Any status - 3xx (a signed screenshot URL goes back as it is), 4xx, 5xx - is the service's answer.
+        conn.request(method, path, body=data, headers=headers)
+        r = conn.getresponse()
+        status, payload, upstream = r.status, r.read(), r.headers
+    except http.client.IncompleteRead as e:
+        log.warning("reports proxy (%s): %s came back short: %d bytes, %s more expected",
+                    app, path, len(e.partial), e.expected)
+        return _err(502, "the reports service's answer came back incomplete")
+    except (http.client.HTTPException, OSError, TimeoutError) as e:
+        log.warning("reports proxy (%s): %s unreachable: %s", app, path, e)
+        return _err(502, "the reports service is not reachable")
+    finally:
+        conn.close()
+    if status in (401, 403) and upstream.get(TRUST_REFUSAL_HEADER):
+        # The service refused THIS APP (a setup mistake), not the person. A 401 here would read, to a
+        # client that treats 401 as "your sign-in failed" (a seal laptop's outbox), as the person's.
+        log.warning("reports proxy (%s): the service refused this app: %s %s", app, status, payload[:300])
+        return _err(502, "the reports service refused this app")
+    return status, payload, {h: upstream[h] for h in _BACK if upstream.get(h) is not None}
 
 
 def create_proxy_blueprint(
@@ -57,73 +152,22 @@ def create_proxy_blueprint(
     *,
     url_prefix: str = "/bugs",
     timeout: float = 30,
-) -> Blueprint:
-    bp = Blueprint(f"bug_report_proxy_{app}", __name__)
-    base = central_url.rstrip("/")
-    target = urlsplit(base)
-    if target.scheme not in ("http", "https") or not target.hostname:
-        raise ValueError(f"central_url must be an http(s) URL: {central_url!r}")
-    connection = http.client.HTTPSConnection if target.scheme == "https" else http.client.HTTPConnection
+):
+    from flask import Blueprint, Response, request
 
-    def _ascii(v: str) -> str:
-        return quote(v or "", safe=" @.+-_'")
+    _target(central_url)    # a bad URL fails at start-up, not on the first report
+    bp = Blueprint(f"bug_report_proxy_{app}", __name__)
 
     @bp.route(url_prefix, defaults={"rest": ""}, methods=["GET", "POST", "PATCH", "DELETE"])
     @bp.route(f"{url_prefix}/<path:rest>", methods=["GET", "POST", "PATCH", "DELETE"])
-    def forward(rest: str):
-        if any(seg in ("..", ".") or "\\" in seg for seg in rest.split("/")):
-            return _err(400, "invalid path")
-        path = target.path + ("/" + rest if rest else "")
-        query = request.query_string.decode("latin-1")
-        # The list is this app's own reports unless the caller says otherwise (3.0.1): the open count and
-        # the queue must not show every app's, which is what the service gives a trusted app with no filter.
-        if request.method == "GET" and not rest and "app" not in request.args:
-            query = (query + "&" if query else "") + "app=" + quote(app, safe="")
-        if query:
-            path += "?" + query
-        try:
-            person = person_provider() or {}
-            headers = {h: request.headers[h] for h in _FORWARD if h in request.headers}
-            headers.update({
-                "Authorization": f"Bearer {token_provider()}",
-                "X-Leap-Actor-Email": _ascii(person.get("email", "")),
-                "X-Leap-Actor-Name": _ascii(person.get("name", "")),
-                "X-Leap-App": app,
-            })
-        except Exception as e:  # noqa: BLE001 — no token / identity: say so, do not guess
-            log.warning("reports proxy (%s): could not get a token or identity: %s", app, e)
-            return _err(502, "could not authenticate to the reports service")
-        data = request.get_data() if request.method in ("POST", "PATCH", "DELETE") else None
-        conn = connection(target.hostname, target.port, timeout=timeout)
-        try:
-            # Any status - 3xx (a signed screenshot URL goes back as it is), 4xx, 5xx - is the service's answer.
-            conn.request(request.method, path, body=data, headers=headers)
-            r = conn.getresponse()
-            return _relay(r.status, r.read(), r.headers)
-        except http.client.IncompleteRead as e:
-            log.warning("reports proxy (%s): %s came back short: %d bytes, %s more expected",
-                        app, path, len(e.partial), e.expected)
-            return _err(502, "the reports service's answer came back incomplete")
-        except (http.client.HTTPException, OSError, TimeoutError) as e:
-            log.warning("reports proxy (%s): %s unreachable: %s", app, path, e)
-            return _err(502, "the reports service is not reachable")
-        finally:
-            conn.close()
-
-    def _relay(status, body, upstream_headers):
-        if status in (401, 403) and upstream_headers.get(TRUST_REFUSAL_HEADER):
-            # The service refused THIS APP (a setup mistake), not the person. A 401 here would read, to a
-            # client that treats 401 as "your sign-in failed" (a seal laptop's outbox), as the person's.
-            log.warning("reports proxy (%s): the service refused this app: %s %s", app, status, body[:300])
-            return _err(502, "the reports service refused this app")
-        resp = Response(body, status=status)
-        for h in _BACK:
-            v = upstream_headers.get(h)
-            if v is not None:
-                resp.headers[h] = v
+    def _forward(rest: str):
+        status, payload, headers = forward(
+            request.method, rest, request.query_string.decode("latin-1"), request.get_data(),
+            request.headers, central_url=central_url, app=app, token_provider=token_provider,
+            person_provider=person_provider, timeout=timeout)
+        resp = Response(payload, status=status)
+        for k, v in headers.items():
+            resp.headers[k] = v
         return resp
-
-    def _err(status, message):
-        return Response(json.dumps({"error": message}), status=status, mimetype="application/json")
 
     return bp

@@ -118,6 +118,26 @@ and 401 (sign in to vote) pass through. A list with no `app` query is asked for 
 passes through. A `..` path segment is refused (400). A service that cannot be reached is a 502, and a token or identity that cannot be
 produced is a 502 with nothing sent; the 502 bodies are generic (the reason goes to the log, not the browser). Standard library only (`http.client`; it never sends `Connection: close`, which Azure Container Apps' internal ingress answers by cutting large responses short).
 
+### Without Flask: `bug_report.proxy.forward` (3.1.0)
+
+An app that is not Flask (a standard-library `http.server`, say) calls the proxy's core directly. The blueprint above is a
+thin wrapper over it, so every rule is the same:
+
+```python
+from bug_report.proxy import forward
+
+status, body, headers = forward(
+    method, rest, query, body, browser_headers,      # rest: "" | "<id>" | "<id>/vote" | "<id>/screenshot"; query: no "?"
+    central_url="http://leaphq-reports/api/bugs", app="report",
+    token_provider=lambda: credential.get_token(SCOPE).token,
+    person_provider=lambda: {"email": "ann@example.com", "name": "Ann"},
+)
+# write `status`, `headers` and `body` back to the browser
+```
+
+It returns `(status, body_bytes, headers_dict)` and never raises for a service or network problem (those are 502s). The
+package still depends on Flask and `import bug_report` imports it; `forward()` itself uses no Flask. `rest` may be raw from the request line (`a%20b`, `%2e%2e`) or already decoded; it is decoded once and `..`, `.` and `\` segments are refused (400, nothing sent) either way.
+
 ## The service side: who is calling (3.0.0)
 
 ```python

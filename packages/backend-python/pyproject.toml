@@ -1,6 +1,6 @@
 [project]
 name = "bug-report-py"
-version = "3.0.2"
+version = "3.1.0"
 description = "Flask blueprint + storage interface implementing the bug-report-widget API spec."
 readme = "README.md"
 license = { text = "MIT" }
