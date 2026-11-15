@@ -116,6 +116,9 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/BugSummary"
+                  canTriage:
+                    type: boolean
+                    description: Whether the caller may triage (the app's `is_admin` answer; 3.3.0, the Python backend only).
 
   /bugs/{id}:
     parameters:
@@ -219,7 +222,7 @@ paths:
       - $ref: "#/components/parameters/BugId"
     post:
       summary: Vote for a report (any signed-in caller; backends 3.0.0)
-      description: One vote per person; voting twice is a no-op. 401 when nobody is signed in.
+      description: One vote per person; voting twice is a no-op that still answers 200 with `voted` true. 401 when nobody is signed in.
       operationId: voteBug
       responses:
         "200":
@@ -463,6 +466,9 @@ components:
           type: integer
           minimum: 0
           description: Count of people who voted (3.0.0); 0 on a v2 record.
+        myVote:
+          type: boolean
+          description: Whether the caller has voted (3.3.0; the Python backend only, the Node backend does not send it). False when nobody is signed in.
 
     Bug:
       allOf:
@@ -474,6 +480,9 @@ components:
             metaUrl: { type: string }
             metaUserAgent: { type: string }
             metaBuildSha: { type: string }
+            canTriage:
+              type: boolean
+              description: Whether the caller may triage (the app's `is_admin` answer; 3.3.0, the Python backend only).
             canNotify:
               type: boolean
               description: |

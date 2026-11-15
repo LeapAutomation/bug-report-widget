@@ -64,6 +64,8 @@ export interface BugSummary {
   parentId?: string | null;
   duplicateOf?: string | null;
   votes?: number;
+  /** Whether the caller has voted (backends 3.3.0; the Python backend only). */
+  myVote?: boolean;
 }
 
 export interface AuditEntry {
@@ -84,6 +86,8 @@ export interface Bug extends BugSummary {
   transcript?: TranscriptTurn[] | null;
   /** GET /bugs/{id} only: the server can email the reporter and the report has an address (backends 2.2.0). */
   canNotify?: boolean;
+  /** Whether the caller may triage: the app's `is_admin` answer (backends 3.3.0; the Python backend only). */
+  canTriage?: boolean;
   /** PATCH response only, when `notify` was requested (backends 2.2.0). */
   notified?: Notified;
   audit: AuditEntry[];
@@ -93,6 +97,12 @@ export interface Notified {
   ok: boolean;
   to: string;
   error?: string;
+}
+
+/** GET /bugs response body. `canTriage` is the app's `is_admin` answer for the caller (backends 3.3.0; Python only). */
+export interface BugList {
+  bugs: BugSummary[];
+  canTriage?: boolean;
 }
 
 /** POST/DELETE /bugs/{id}/vote response (backends 3.0.0). */

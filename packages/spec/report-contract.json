@@ -156,7 +156,8 @@
     "owner",
     "parentId",
     "duplicateOf",
-    "votes"
+    "votes",
+    "myVote"
   ],
 
   "_v3": [
@@ -167,7 +168,10 @@
     "`owner`, `parentId` and `duplicateOf` are TRIAGE fields (null until set);",
     "setting `duplicateOf` declines the report with the note",
     "'duplicate of <id>'. `votes` is a count; one vote per signed-in person.",
-    "A v2 record carries none of these: they read back null, `votes` 0."
+    "A v2 record carries none of these: they read back null, `votes` 0.",
+    "`myVote` (3.3.0) is whether the CALLER has voted, false for nobody signed in;",
+    "the Python backend sends it on list and detail, the Node backend does not yet.",
+    "`canTriage` (3.3.0) is the app's own is_admin answer for the caller: a top-level field of the list body and on the detail."
   ],
   "products": ["PikPak", "Seal", "Placement", "Internal"],
   "appProducts": {
@@ -200,7 +204,8 @@
     "metaUrl",
     "metaUserAgent",
     "metaBuildSha",
-    "audit"
+    "audit",
+    "canTriage"
   ],
   "optionalDetailFields": ["transcript"],
 
@@ -246,6 +251,7 @@
     "parentId": null,
     "duplicateOf": null,
     "votes": 2,
+    "myVote": true,
     "details": "Tapping 7.5 twice leaves the picker open and the value unset.",
     "metaUrl": "https://hq.helloleap.ai/index.html?tab=entry",
     "metaUserAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X)",

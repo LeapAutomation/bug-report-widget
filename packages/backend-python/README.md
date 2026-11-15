@@ -58,7 +58,9 @@ what changed (`area: none -> Cutter; priority: none -> now`); a value equal to t
 `POST /bugs/{id}/vote` and `DELETE /bugs/{id}/vote` need only a signed-in caller (the `actor_identity` email; without
 that hook, the body's `actorEmail`), one vote per person, case-insensitively. `GET /bugs` filters by `app`, `kind`,
 `area` and `priority` as well as `status` and `days`. Every summary carries `kind`, `app`, `product`, `area`,
-`priority`, `owner`, `parentId`, `duplicateOf` and `votes`; a record written before v3 has them null and `votes` 0.
+`priority`, `owner`, `parentId`, `duplicateOf` and `votes`, and (3.3.0) `myVote`, whether the caller has voted (false with no
+identity; a store with `voted_among` is asked once per list). A repeat POST is a 200 with `voted: true`; DELETE with nothing to take
+back answers `voted: false`; both carry the current `votes`. `GET /bugs` also carries a top-level `canTriage` and the detail carries one: the `is_admin` answer for the caller (3.3.0), the signal for showing triage controls. The Node backend sends neither `myVote` nor `canTriage`. A record written before v3 has them null and `votes` 0.
 `create_blueprint(app_stamp=lambda req: "placements")` stamps the app a report is filed under (the body's `app` is
 never read); `guard=` refuses a request before any route runs.
 

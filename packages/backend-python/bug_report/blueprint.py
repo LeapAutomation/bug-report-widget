@@ -277,10 +277,13 @@ def create_blueprint(
         if not admin:
             me = _caller_email(request)
             bugs = [b for b in bugs if _visible(b, me)]
-        counts = _vote_counts([b.id for b in bugs])
-        rows = [contract.with_kind({**b.to_summary(), "votes": counts.get(b.id, 0)}) for b in bugs]
+        ids = [b.id for b in bugs]
+        counts = _vote_counts(ids)
+        mine = _my_votes(ids)
+        rows = [contract.with_kind({**b.to_summary(), "votes": counts.get(b.id, 0), "myVote": b.id in mine})
+                for b in bugs]
         rows.sort(key=lambda r: r["addedAt"], reverse=True)
-        return jsonify({"bugs": rows})
+        return jsonify({"bugs": rows, "canTriage": bool(admin)})
 
     def _caller_email(req) -> str:
         """The caller's address, for what a non-admin may see: the checked identity when the app
@@ -310,9 +313,18 @@ def create_blueprint(
         counter = getattr(store, "vote_counts", None)
         return counter(ids) if counter and ids else {}
 
+    def _my_votes(ids) -> set:
+        """Which of ``ids`` the caller (the same person the vote routes use) has voted on;
+        nobody signed in, or a store that predates votes, means none. One store call per list."""
+        finder = getattr(store, "voted_among", None)
+        who = _voter(request)
+        return set(finder(ids, who)) if finder and ids and who else set()
+
     def _detail(bug) -> dict:
         full = contract.with_kind(bug.to_full())
         full["votes"] = _vote_counts([bug.id]).get(bug.id, 0)
+        full["myVote"] = bug.id in _my_votes([bug.id])
+        full["canTriage"] = bool(is_admin(request))
         full["audit"] = [a.to_dict() for a in store.list_audit(bug.id)]
         return full
 
@@ -537,7 +549,9 @@ def create_blueprint(
             (store.add_vote if adding else store.remove_vote)(bug_id, voter)
         except NotFound:
             return jsonify({"error": "not found"}), 404
-        return jsonify({"votes": store.vote_counts([bug_id]).get(bug_id, 0), "voted": adding})
+        # `voted` is whether the caller's vote stands now: a repeat POST is a 200 that says true,
+        # a DELETE with nothing to take back says false.
+        return jsonify({"votes": store.vote_counts([bug_id]).get(bug_id, 0), "voted": bug_id in _my_votes([bug_id])})
 
     @bp.route(f"{url_prefix}/<bug_id>/vote", methods=["POST"])
     def api_vote(bug_id: str):

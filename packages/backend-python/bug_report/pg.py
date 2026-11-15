@@ -243,6 +243,16 @@ class PostgresStore:
         got = self._run(go)
         return {i: int(got.get(i, 0)) for i in bug_ids}
 
+    def voted_among(self, bug_ids: list[str], voter: str) -> set[str]:
+        v = normal_voter(voter)
+        if not bug_ids or not v:
+            return set()
+
+        def go(cur):
+            cur.execute("SELECT id FROM report_votes WHERE voter=%s AND id = ANY(%s)", (v, list(bug_ids)))
+            return {r[0] for r in cur.fetchall()}
+        return self._run(go)
+
     def list_votes(self, bug_id: str) -> list[dict]:
         def go(cur):
             cur.execute("SELECT voter, at FROM report_votes WHERE id=%s ORDER BY at, voter", (bug_id,))

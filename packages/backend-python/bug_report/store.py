@@ -196,6 +196,9 @@ class Store(Protocol):
         ...
     def remove_vote(self, bug_id: str, voter: str) -> bool: ...
     def vote_counts(self, bug_ids: list[str]) -> dict[str, int]: ...
+    def voted_among(self, bug_ids: list[str], voter: str) -> set[str]:
+        """The ids in ``bug_ids`` that ``voter`` has voted on (one lookup for the whole list)."""
+        ...
     def list_votes(self, bug_id: str) -> list[dict]:
         """``[{"voter", "at"}]``, oldest first."""
         ...
@@ -274,6 +277,10 @@ class InMemoryStore:
 
     def vote_counts(self, bug_ids):
         return {i: len(self._votes.get(i, {})) for i in bug_ids}
+
+    def voted_among(self, bug_ids, voter):
+        v = normal_voter(voter)
+        return {i for i in bug_ids if v and v in self._votes.get(i, {})}
 
     def list_votes(self, bug_id):
         return [{"voter": v, "at": at} for v, at in self._votes.get(bug_id, {}).items()]
@@ -487,6 +494,10 @@ class FilesystemStore:
 
     def vote_counts(self, bug_ids):
         return {i: len(self._read_votes(i)) for i in bug_ids}
+
+    def voted_among(self, bug_ids, voter):
+        v = normal_voter(voter)
+        return {i for i in bug_ids if v and v in self._read_votes(i)}
 
     def list_votes(self, bug_id):
         return [{"voter": v, "at": at} for v, at in self._read_votes(bug_id).items()]
