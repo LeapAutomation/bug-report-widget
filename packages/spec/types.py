@@ -60,6 +60,7 @@ class BugSummary(TypedDict):
     parentId: NotRequired[str | None]
     duplicateOf: NotRequired[str | None]
     votes: NotRequired[int]
+    myVote: NotRequired[bool]  # whether the caller has voted (backends 3.3.0; Python backend only)
 
 
 class AuditEntry(TypedDict):
@@ -78,6 +79,7 @@ class Bug(BugSummary):
     metaBuildSha: NotRequired[str]
     transcript: NotRequired[list[TranscriptTurn] | None]
     canNotify: NotRequired[bool]  # GET /bugs/<id> only (backends 2.2.0)
+    canTriage: NotRequired[bool]  # whether the caller may triage: the app's is_admin (backends 3.3.0; Python only)
     notified: NotRequired["Notified"]  # PATCH response only, when notify was requested (backends 2.2.0)
     audit: list[AuditEntry]
 
@@ -86,6 +88,11 @@ class Notified(TypedDict):
     ok: bool
     to: str
     error: NotRequired[str]
+
+
+class BugList(TypedDict):
+    bugs: list[BugSummary]
+    canTriage: NotRequired[bool]  # backends 3.3.0; Python only
 
 
 class Voted(TypedDict):

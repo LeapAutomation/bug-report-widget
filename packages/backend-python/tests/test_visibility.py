@@ -144,7 +144,7 @@ def test_the_app_default_actor_is_not_a_caller_nobody_sees_its_reports(any_store
     c = app.test_client()
     bid = c.post("/bugs", json={"details": "filed with no one signed in"}).get_json()["id"]
     assert any_store.get_bug(bid).actor_email == "owner@example.com"
-    assert c.get("/bugs").get_json() == {"bugs": []}
+    assert c.get("/bugs").get_json()["bugs"] == []
     assert c.get(f"/bugs/{bid}").status_code == 404
 
 

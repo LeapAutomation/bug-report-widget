@@ -303,3 +303,117 @@ def test_the_store_protocol_takes_exactly_the_contracts_filters():
     for cls in (InMemoryStore, FilesystemStore):
         params = set(inspect.signature(cls.list_bugs).parameters) - {"self", "status", "since_iso"}
         assert params == want, cls
+
+
+# ---- myVote (3.3.0) --------------------------------------------------------
+
+def _my_vote(c, bid):
+    detail = c.get(f"/api/bugs/{bid}").get_json()["myVote"]
+    listed = next(b for b in c.get("/api/bugs?days=1").get_json()["bugs"] if b["id"] == bid)["myVote"]
+    assert detail == listed
+    return detail
+
+
+def test_my_vote_follows_voting_and_unvoting(client):
+    bid = file_bug(client)
+    assert _my_vote(client, bid) is False
+    client.post(f"/api/bugs/{bid}/vote")
+    assert _my_vote(client, bid) is True
+    client.delete(f"/api/bugs/{bid}/vote")
+    assert _my_vote(client, bid) is False
+
+
+def test_my_vote_is_the_callers_own_and_case_insensitive(client):
+    bid = file_bug(client)
+    other = file_bug(client)
+    client.post(f"/api/bugs/{bid}/vote")
+    client.person[0] = "someone.else@example.com"
+    assert _my_vote(client, bid) is False                      # a different caller
+    assert client.get(f"/api/bugs/{bid}").get_json()["votes"] == 1
+    client.person[0] = ADMIN.upper()
+    assert _my_vote(client, bid) is True and _my_vote(client, other) is False
+    client.person[0] = ""                                      # nobody signed in
+    assert _my_vote(client, bid) is False
+
+
+def test_voting_twice_is_a_200_that_still_says_voted(client):
+    bid = file_bug(client)
+    first = client.post(f"/api/bugs/{bid}/vote")
+    again = client.post(f"/api/bugs/{bid}/vote")
+    assert again.status_code == 200
+    assert first.get_json() == again.get_json() == {"votes": 1, "voted": True}
+
+
+def test_delete_with_no_vote_says_voted_false_and_keeps_the_count(client):
+    bid = file_bug(client)
+    assert client.delete(f"/api/bugs/{bid}/vote").get_json() == {"votes": 0, "voted": False}
+    client.person[0] = "b@example.com"
+    client.post(f"/api/bugs/{bid}/vote")
+    client.person[0] = ADMIN
+    assert client.delete(f"/api/bugs/{bid}/vote").get_json() == {"votes": 1, "voted": False}
+
+
+def test_voted_among_is_the_callers_ids_in_the_list(any_store):
+    a, b = file_bug(make_client(any_store)), file_bug(make_client(any_store))
+    any_store.add_vote(a, "Me@Example.com")
+    any_store.add_vote(b, "you@example.com")
+    assert any_store.voted_among([a, b, "nope"], "me@example.com") == {a}
+    assert any_store.voted_among([], "me@example.com") == set()
+    assert any_store.voted_among([a, b], "") == set()
+
+
+# ---- canTriage (3.3.0) -----------------------------------------------------
+
+def _triage_client(store, email, admin_email=ADMIN):
+    app = Flask(__name__)
+    app.register_blueprint(create_blueprint(
+        store=store, is_admin=lambda r: bool(email) and email == admin_email,
+        actor_identity=lambda r: {"email": email, "name": ""} if email else ""), url_prefix="/api")
+    return app.test_client()
+
+
+@pytest.mark.parametrize("email,expected", [(ADMIN, True), ("pat@example.com", False), ("", False)])
+def test_can_triage_is_the_apps_is_admin_on_list_and_detail(any_store, email, expected):
+    bid = file_bug(make_client(any_store))
+    feature = file_bug(make_client(any_store), tags=["feature"])
+    c = _triage_client(any_store, email)
+    listed = c.get("/api/bugs?days=1").get_json()
+    assert listed["canTriage"] is expected
+    assert c.get(f"/api/bugs/{feature}").get_json()["canTriage"] is expected
+    if expected:
+        assert c.get(f"/api/bugs/{bid}").get_json()["canTriage"] is True
+
+
+# ---- round 2: who myVote is asked for --------------------------------------
+
+def _claims_client(store, **kw):
+    app = Flask(__name__)
+    app.register_blueprint(create_blueprint(store=store, **kw))
+    return app.test_client()
+
+
+def test_my_vote_is_never_the_default_actors(any_store):
+    c = _claims_client(any_store, default_actor_email="app@example.com")
+    bid = c.post("/bugs", json={"details": "x"}).get_json()["id"]
+    r = c.post(f"/bugs/{bid}/vote")                  # no claim: the default votes
+    assert r.get_json() == {"votes": 1, "voted": True}
+    assert c.get(f"/bugs/{bid}").get_json()["myVote"] is False      # an anonymous caller is not that person
+    assert c.get("/bugs?days=1").get_json()["bugs"][0]["myVote"] is False
+    assert c.get(f"/bugs/{bid}?actorEmail=app@example.com").get_json()["myVote"] is True   # a claim of it is
+
+
+def test_a_store_without_voted_among_answers_with_what_was_asked(any_store):
+    class Old:
+        def __init__(self, inner):
+            self._i = inner
+        def __getattr__(self, n):
+            if n == "voted_among":
+                raise AttributeError(n)
+            return getattr(self._i, n)
+    c = _claims_client(Old(any_store))
+    bid = c.post("/bugs", json={"details": "x"}).get_json()["id"]
+    body = {"actorEmail": "a@example.com"}
+    assert c.post(f"/bugs/{bid}/vote", json=body).get_json() == {"votes": 1, "voted": True}
+    assert c.post(f"/bugs/{bid}/vote", json=body).get_json() == {"votes": 1, "voted": True}
+    assert c.delete(f"/bugs/{bid}/vote?actorEmail=a@example.com").get_json() == {"votes": 0, "voted": False}
+    assert "myVote" in c.get(f"/bugs/{bid}").get_json() and c.get(f"/bugs/{bid}").get_json()["myVote"] is False

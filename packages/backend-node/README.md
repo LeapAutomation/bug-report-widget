@@ -113,4 +113,4 @@ The router stores and echoes the v3 fields (`kind`, `app`, `product`, `area`, `p
 `duplicate of <id>`), filters the list by `app`, `kind`, `area` and `priority`, and serves `POST`/`DELETE /:id/vote`.
 Options: `appStamp(req)` (the app a report is filed under; the body's `app` is never read) and `actorIdentity(req)`
 (the signed-in email, who votes). `FilesystemStore` and `InMemoryStore` keep them; the Azure Tables store does not yet
-and the router answers 501 for triage fields and votes on it. The Python library is the reference for the central store.
+and the router answers 501 for triage fields and votes on it. The Python library is the reference for the central store. `myVote` and `canTriage` (3.3.0) are Python only, not ported.

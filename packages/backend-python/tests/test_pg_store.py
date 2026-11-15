@@ -141,3 +141,28 @@ def test_a_database_that_is_down_is_a_store_error_not_a_driver_exception(pg_dsn)
     st = PostgresStore(lambda: psycopg.connect("postgresql://postgres@127.0.0.1:1/x", connect_timeout=1))
     with pytest.raises(StoreError):
         st.get_bug("bug-20200101-000000-aaaaaa")
+
+
+def test_the_list_costs_a_bounded_number_of_queries_however_many_reports(pg_store):
+    """myVote is one `voted_among` query for the whole list, not one per report."""
+    from flask import Flask
+    from bug_report import create_blueprint
+    app = Flask(__name__)
+    app.register_blueprint(create_blueprint(
+        store=pg_store, is_admin=lambda r: True, actor_identity=lambda r: {"email": "me@example.com", "name": ""}))
+    c = app.test_client()
+    runs = []
+    real = pg_store._run
+    pg_store._run = lambda fn: (runs.append(fn), real(fn))[1]
+
+    def list_cost():
+        runs.clear()
+        assert c.get("/bugs?days=365").status_code == 200
+        return len(runs)
+
+    ids = [c.post("/bugs", json={"details": f"d{i}"}).get_json()["id"] for i in range(3)]
+    small = list_cost()
+    ids += [c.post("/bugs", json={"details": f"d{i}"}).get_json()["id"] for i in range(3, 15)]
+    for i in ids:
+        c.post(f"/bugs/{i}/vote")
+    assert list_cost() == small <= 3

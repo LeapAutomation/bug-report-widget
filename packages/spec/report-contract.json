@@ -167,7 +167,8 @@
     "`owner`, `parentId` and `duplicateOf` are TRIAGE fields (null until set);",
     "setting `duplicateOf` declines the report with the note",
     "'duplicate of <id>'. `votes` is a count; one vote per signed-in person.",
-    "A v2 record carries none of these: they read back null, `votes` 0."
+    "A v2 record carries none of these: they read back null, `votes` 0.",
+    "Caller fields (3.3.0) are listed in `callerFields`, not in the two lists above."
   ],
   "products": ["PikPak", "Seal", "Placement", "Internal"],
   "appProducts": {
@@ -179,6 +180,16 @@
     "leaphq": "Internal"
   },
   "priorities": ["now", "next", "later"],
+  "_callerFields": [
+    "Fields that describe the CALLER, not the report, like `canNotify` (which",
+    "this contract has never listed either). The Python backend sends them,",
+    "the Node backend does not yet. `myVote` is on every list row and the",
+    "detail: whether the caller has voted (false for nobody signed in; the",
+    "caller is the checked identity, or in claims mode the request's own",
+    "`actorEmail`, never the app's default actor). `canTriage` is the app's own",
+    "is_admin answer, a top-level field of the list body and on the detail."
+  ],
+  "callerFields": ["myVote", "canTriage"],
   "triageFields": ["area", "priority", "owner", "parentId", "duplicateOf"],
   "listFilters": ["status", "days", "app", "kind", "area", "priority"],
 
@@ -246,6 +257,7 @@
     "parentId": null,
     "duplicateOf": null,
     "votes": 2,
+    "myVote": true,
     "details": "Tapping 7.5 twice leaves the picker open and the value unset.",
     "metaUrl": "https://hq.helloleap.ai/index.html?tab=entry",
     "metaUserAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X)",

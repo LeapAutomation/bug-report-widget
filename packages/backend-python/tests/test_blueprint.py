@@ -161,7 +161,7 @@ def test_screenshot_type_is_sniffed_not_taken_from_the_data_url(client):
 # ---------------------------------------------------------------------------
 
 def test_list_empty(client):
-    assert client.get("/bugs").get_json() == {"bugs": []}
+    assert client.get("/bugs").get_json()["bugs"] == []
 
 
 def test_list_sorted_newest_first(client):
@@ -245,7 +245,7 @@ def test_admin_gate_blocks_patch_and_filters_list(store, admin_deny):
     app.register_blueprint(create_blueprint(store=store, is_admin=admin_deny))
     c = app.test_client()
     bid = c.post("/bugs", json={"details": "anyone can file"}).get_json()["id"]
-    assert c.get("/bugs").get_json() == {"bugs": []}      # a bug filed by nobody is no one's to see
+    assert c.get("/bugs").get_json()["bugs"] == []      # a bug filed by nobody is no one's to see
     assert c.get(f"/bugs/{bid}").status_code == 404
     assert c.patch(f"/bugs/{bid}", json={"status": "triaged"}).status_code == 403
 

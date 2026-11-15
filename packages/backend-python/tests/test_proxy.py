@@ -328,3 +328,23 @@ def test_a_body_that_arrives_short_is_a_502_not_a_crash_or_a_short_200():
     t.join(3)
     lsock.close()
     assert r.status_code == 502 and "incomplete" in r.get_json()["error"]
+
+
+def test_can_triage_and_my_vote_pass_through_the_proxy_unchanged(front):
+    feat = file(front, tags=["feature"])
+    front.c.post(f"/api/bugs/{feat}/vote")
+    listed = front.c.get("/api/bugs?days=1").get_json()
+    assert listed["canTriage"] is True and listed["bugs"][0]["myVote"] is True
+    front.person[0] = {"email": "someone@example.com", "name": ""}
+    listed = front.c.get("/api/bugs?days=1").get_json()
+    assert listed["canTriage"] is False and listed["bugs"][0]["myVote"] is False
+    assert front.c.get(f"/api/bugs/{feat}").get_json()["canTriage"] is False
+
+
+def test_no_identity_through_the_proxy_is_not_triage_and_not_a_vote(front):
+    feat = file(front, tags=["feature"])
+    front.c.post(f"/api/bugs/{feat}/vote")
+    front.person[0] = {"email": "", "name": ""}
+    listed = front.c.get("/api/bugs?days=1").get_json()
+    assert listed["canTriage"] is False
+    assert all(b["myVote"] is False for b in listed["bugs"])
