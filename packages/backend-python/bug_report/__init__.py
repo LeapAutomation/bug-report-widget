@@ -44,7 +44,7 @@ from .models import (
     valid_bug_id,
 )
 
-__version__ = "3.1.0"
+__version__ = "3.2.0"
 
 from . import contract
 from .contract import (

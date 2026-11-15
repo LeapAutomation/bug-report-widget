@@ -45,7 +45,7 @@ paths:
                 properties:
                   id:
                     type: string
-                    example: bug-20260516-181523-a3b91f2
+                    example: bug-20260516-181523-a3b91f
                   app:
                     type: string
                     nullable: true
@@ -69,7 +69,7 @@ paths:
                 $ref: "#/components/schemas/Error"
 
     get:
-      summary: List bug reports (admin)
+      summary: List bug reports (an admin sees all; anyone else sees feature requests and their own)
       operationId: listBugs
       parameters:
         - in: query
@@ -297,8 +297,8 @@ components:
       required: true
       schema:
         type: string
-        pattern: '^bug-\d{8}-\d{6}-[a-f0-9]{6}$'
-        example: bug-20260516-181523-a3b91f2
+        pattern: '^bug-\d{8}-\d{6}-(?:[a-f0-9]{6}|[a-f0-9]{12})$'
+        example: bug-20260516-181523-a3b91f
 
   schemas:
     Status:

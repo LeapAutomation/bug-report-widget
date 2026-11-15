@@ -108,7 +108,7 @@ def test_a_persons_403_and_401_pass_through(central):
     c = Caller(central[0].url)
     bid = c.file()
     c.person = {"email": "someone@example.com", "name": ""}
-    assert c("GET")[0] == 403
+    assert c("GET", bid)[0] == 403            # someone else's bug (3.2.0: the list is filtered, not refused)
     c.person = {"email": "", "name": ""}
     assert c("POST", f"{bid}/vote")[0] == 401
 

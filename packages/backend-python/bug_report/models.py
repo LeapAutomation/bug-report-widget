@@ -42,7 +42,7 @@ def screenshot_content_type(data: bytes) -> str:
         return "image/webp"
     return "image/png"
 
-_BUG_ID_RE = re.compile(r"^bug-\d{8}-\d{6}-[a-f0-9]{6}$")
+_BUG_ID_RE = re.compile(r"^bug-\d{8}-\d{6}-(?:[a-f0-9]{6}|[a-f0-9]{12})$")
 
 
 def new_bug_id() -> str:
@@ -52,6 +52,7 @@ def new_bug_id() -> str:
 
 
 def valid_bug_id(bug_id: str) -> bool:
+    """New ids end in 6 hex; 12 hex is accepted too (3.2.0), for reports imported from LeapHQ."""
     return bool(_BUG_ID_RE.match(bug_id or ""))
 
 

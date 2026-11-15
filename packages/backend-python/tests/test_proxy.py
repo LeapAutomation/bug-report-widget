@@ -132,13 +132,21 @@ def test_every_route_goes_through_with_status_body_and_content_type_unchanged(fr
     assert big.status_code == 413
 
 
-def test_a_non_admin_person_gets_the_central_403_through_the_proxy(front):
-    bid = file(front)
+def test_a_non_admin_person_sees_features_and_their_own_through_the_proxy(front):
+    """3.2.0: the list and the detail are filtered by the checked person; triage is still 403."""
+    mine = file(front)                                    # filed by the admin
+    feat = file(front, tags=["feature"])
     front.person[0] = {"email": "someone@example.com", "name": ""}
-    r = front.c.get("/api/bugs")
-    assert r.status_code == 403
-    assert front.c.patch(f"/api/bugs/{bid}", json={"area": "x"}).status_code == 403
-    assert front.c.post(f"/api/bugs/{bid}/vote").status_code == 200      # voting is for anyone signed in
+    own = file(front)
+    ids = lambda r: {b["id"] for b in r.get_json()["bugs"]}          # noqa: E731
+    r = front.c.get("/api/bugs?days=1")
+    assert r.status_code == 200 and ids(r) == {feat, own}            # not the admin's bug
+    assert front.c.get(f"/api/bugs/{mine}").status_code == 403
+    assert front.c.get(f"/api/bugs/{own}").status_code == 200
+    assert front.c.post(f"/api/bugs/{feat}/vote").get_json()["voted"] is True
+    assert front.c.patch(f"/api/bugs/{own}", json={"area": "x"}).status_code == 403
+    front.person[0] = {"email": "admin@example.com", "name": ""}
+    assert ids(front.c.get("/api/bugs?days=1")) == {mine, feat, own}  # admin unchanged
 
 
 def test_an_untrusted_app_is_a_502_on_every_route_not_a_403(front):

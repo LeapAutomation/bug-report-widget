@@ -43,6 +43,8 @@ LeapHQ Review ──(LeapHQ's own identity, a token)──► leaphq-reports (on
   - The service verifies the token with **PyJWT** (signature, issuer, audience and expiry: a decode-only check would make every trusted client id spoofable), then believes those headers only from identities on its `TRUSTED_APPS` list (client id → app name). The app name comes from the token, not the request.
   - **LeapHQ calls as its own identity** like every other app (it is `leaphq` in `TRUSTED_APPS`), not through a gateway route.
   - This replaces the near-identical `trusted_identity()` / `trusted_person()` / `is_admin()` copies in SV, PIV, seal and the fleet dashboard. `trusted_person()` moves into the library once, for each app's proxy to use behind its own gateway.
+- **Who sees what (3.2.0).** Triage is `BUG_ADMINS` only. A person who is not an admin lists only reports with `kind=feature` and their own (`actor_email` equals the person from `X-Leap-Actor-Email`, any kind); detail, screenshot and vote on another person's report are 403. The open count they see counts only those. The person still comes from the trusted app's headers, so the trust model is unchanged.
+- **Ids (3.2.0).** `bug-YYYYMMDD-HHMMSS-` plus 6 hex (new ids) or 12 hex (imported from LeapHQ); the store, the routes, the spec and the Node backend all accept exactly those two.
 - **Seal laptops.** Their outbox forwards to the seal viewer's proxy exactly as it does today, so nothing changes on a station.
 
 ## Store

@@ -76,7 +76,7 @@ for (const [name, makeStore] of STORES) {
       });
       assert.equal(r.status, 201);
       const { id } = await r.json();
-      assert.match(id, /^bug-\d{8}-\d{6}-[a-f0-9]{6}$/);
+      assert.match(id, /^bug-\d{8}-\d{6}-(?:[a-f0-9]{6}|[a-f0-9]{12})$/);
     });
   });
 

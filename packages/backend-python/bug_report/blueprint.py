@@ -259,8 +259,7 @@ def create_blueprint(
 
     @bp.route(url_prefix, methods=["GET"])
     def api_list():
-        if not is_admin(request):
-            abort(403)
+        admin = is_admin(request)
         status_filter = (request.args.get("status") or "").strip() or None
         if status_filter and status_filter not in BUG_STATUSES:
             return jsonify({"error": f"status must be one of {BUG_STATUSES}"}), 400
@@ -275,10 +274,26 @@ def create_blueprint(
         if wanted.get("priority") and wanted["priority"] not in contract.PRIORITIES:
             return jsonify({"error": f"priority must be one of {contract.PRIORITIES}"}), 400
         bugs = list(store.list_bugs(status=status_filter, since_iso=_since_iso(days), **wanted))
+        if not admin:
+            me = _caller_email(request)
+            bugs = [b for b in bugs if _visible(b, me)]
         counts = _vote_counts([b.id for b in bugs])
         rows = [contract.with_kind({**b.to_summary(), "votes": counts.get(b.id, 0)}) for b in bugs]
         rows.sort(key=lambda r: r["addedAt"], reverse=True)
         return jsonify({"bugs": rows})
+
+    def _caller_email(req) -> str:
+        """The caller's address, for what a non-admin may see: the checked identity when the app
+        gave one, else (as for filing) the request's own claim. "" is nobody."""
+        return _voter(req).lower()
+
+    def _visible(bug, me: str) -> bool:
+        """What a non-admin may see (3.2.0): every feature request, and the caller's own reports."""
+        return (bug.effective_kind() == "feature"
+                or bool(me and (bug.actor_email or "").strip().lower() == me))
+
+    def _may_see(bug) -> bool:
+        return bool(is_admin(request)) or _visible(bug, _caller_email(request))
 
     def _vote_counts(ids):
         """Votes per report; a store that predates votes counts none."""
@@ -301,6 +316,8 @@ def create_blueprint(
             bug = store.get_bug(bug_id)
         except NotFound:
             return jsonify({"error": "not found"}), 404
+        if not _may_see(bug):
+            abort(403)
         full = _detail(bug)
         full["canNotify"] = bool(notifier is not None and bug.actor_email)
         return jsonify(full)
@@ -508,6 +525,8 @@ def create_blueprint(
         if not hasattr(store, "add_vote"):
             return jsonify({"error": "this store does not keep votes"}), 501
         try:
+            if not _may_see(store.get_bug(bug_id)):
+                abort(403)
             (store.add_vote if adding else store.remove_vote)(bug_id, voter)
         except NotFound:
             return jsonify({"error": "not found"}), 404
@@ -528,6 +547,8 @@ def create_blueprint(
         if not valid_bug_id(bug_id):
             abort(400)
         try:
+            if not _may_see(store.get_bug(bug_id)):
+                abort(403)
             data = store.get_screenshot(bug_id)
         except NotFound:
             abort(404)
