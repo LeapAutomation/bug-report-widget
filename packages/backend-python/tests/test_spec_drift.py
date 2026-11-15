@@ -92,6 +92,29 @@ def test_every_field_the_server_sends_is_in_the_spec(tmp_path):
     assert set(created) <= _schema_properties_of_created()
 
 
+def _list_body_properties() -> set[str]:
+    """The listBugs 200 body's top-level properties, from the inline schema."""
+    text = SPEC.read_text()
+    block = text[text.index("operationId: listBugs"):text.index("  /bugs/{id}:")]
+    after = block[block.index("properties:", block.index('"200":')):]
+    return set(re.findall(r"^ {18}(\w+):\s*$", after, re.M))
+
+
+def test_the_list_body_is_the_same_in_the_server_the_spec_and_both_types(tmp_path):
+    body = _client(tmp_path).get("/api/bugs?days=1").get_json()
+    spec_keys = _list_body_properties()
+    assert spec_keys == {"bugs", "canTriage"}
+    assert set(body) == spec_keys
+    from importlib import util
+    py = pathlib.Path(__file__).resolve().parents[2] / "spec"
+    mod = util.spec_from_file_location("spec_types", py / "types.py")
+    m = util.module_from_spec(mod); mod.loader.exec_module(m)
+    assert set(m.BugList.__annotations__) == spec_keys
+    ts = (py / "types.ts").read_text()
+    block = ts[ts.index("export interface BugList"):]
+    assert set(re.findall(r"^  (\w+)\??:", block[:block.index("}")], re.M)) == spec_keys
+
+
 def _schema_properties_of_created() -> set[str]:
     """The 201 body's properties, read from the createBug response (an inline schema)."""
     text = SPEC.read_text()

@@ -382,3 +382,38 @@ def test_can_triage_is_the_apps_is_admin_on_list_and_detail(any_store, email, ex
     assert c.get(f"/api/bugs/{feature}").get_json()["canTriage"] is expected
     if expected:
         assert c.get(f"/api/bugs/{bid}").get_json()["canTriage"] is True
+
+
+# ---- round 2: who myVote is asked for --------------------------------------
+
+def _claims_client(store, **kw):
+    app = Flask(__name__)
+    app.register_blueprint(create_blueprint(store=store, **kw))
+    return app.test_client()
+
+
+def test_my_vote_is_never_the_default_actors(any_store):
+    c = _claims_client(any_store, default_actor_email="app@example.com")
+    bid = c.post("/bugs", json={"details": "x"}).get_json()["id"]
+    r = c.post(f"/bugs/{bid}/vote")                  # no claim: the default votes
+    assert r.get_json() == {"votes": 1, "voted": True}
+    assert c.get(f"/bugs/{bid}").get_json()["myVote"] is False      # an anonymous caller is not that person
+    assert c.get("/bugs?days=1").get_json()["bugs"][0]["myVote"] is False
+    assert c.get(f"/bugs/{bid}?actorEmail=app@example.com").get_json()["myVote"] is True   # a claim of it is
+
+
+def test_a_store_without_voted_among_answers_with_what_was_asked(any_store):
+    class Old:
+        def __init__(self, inner):
+            self._i = inner
+        def __getattr__(self, n):
+            if n == "voted_among":
+                raise AttributeError(n)
+            return getattr(self._i, n)
+    c = _claims_client(Old(any_store))
+    bid = c.post("/bugs", json={"details": "x"}).get_json()["id"]
+    body = {"actorEmail": "a@example.com"}
+    assert c.post(f"/bugs/{bid}/vote", json=body).get_json() == {"votes": 1, "voted": True}
+    assert c.post(f"/bugs/{bid}/vote", json=body).get_json() == {"votes": 1, "voted": True}
+    assert c.delete(f"/bugs/{bid}/vote?actorEmail=a@example.com").get_json() == {"votes": 0, "voted": False}
+    assert "myVote" in c.get(f"/bugs/{bid}").get_json() and c.get(f"/bugs/{bid}").get_json()["myVote"] is False

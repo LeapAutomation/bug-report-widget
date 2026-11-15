@@ -60,7 +60,13 @@ that hook, the body's `actorEmail`), one vote per person, case-insensitively. `G
 `area` and `priority` as well as `status` and `days`. Every summary carries `kind`, `app`, `product`, `area`,
 `priority`, `owner`, `parentId`, `duplicateOf` and `votes`, and (3.3.0) `myVote`, whether the caller has voted (false with no
 identity; a store with `voted_among` is asked once per list). A repeat POST is a 200 with `voted: true`; DELETE with nothing to take
-back answers `voted: false`; both carry the current `votes`. `GET /bugs` also carries a top-level `canTriage` and the detail carries one: the `is_admin` answer for the caller (3.3.0), the signal for showing triage controls. The Node backend sends neither `myVote` nor `canTriage`. A record written before v3 has them null and `votes` 0.
+back answers `voted: false`; both carry the current `votes`. `GET /bugs` also carries a top-level `canTriage` and the detail carries one: the `is_admin` answer for the caller (3.3.0), the signal for showing triage controls. The Node backend sends neither `myVote` nor `canTriage`.
+
+**Claims mode and `canTriage`.** `myVote` is asked for the same person `_caller_email` gives (the checked identity, or without
+`actor_identity` the request's own `actorEmail`), never `default_actor_email`: an anonymous caller reads `false` even after the
+default actor has voted, and a caller who claims that address reads `true` (claims are unchecked in that mode, as for filing).
+`canTriage` is only as good as the `is_admin` you pass: the default is `lambda req: True`, so an app that does not pass `is_admin`
+tells everyone `canTriage: true`. A store with `add_vote` but no `voted_among` still votes; `voted` then reports what was asked. A record written before v3 has them null and `votes` 0.
 `create_blueprint(app_stamp=lambda req: "placements")` stamps the app a report is filed under (the body's `app` is
 never read); `guard=` refuses a request before any route runs.
 

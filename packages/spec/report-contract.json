@@ -156,8 +156,7 @@
     "owner",
     "parentId",
     "duplicateOf",
-    "votes",
-    "myVote"
+    "votes"
   ],
 
   "_v3": [
@@ -169,9 +168,7 @@
     "setting `duplicateOf` declines the report with the note",
     "'duplicate of <id>'. `votes` is a count; one vote per signed-in person.",
     "A v2 record carries none of these: they read back null, `votes` 0.",
-    "`myVote` (3.3.0) is whether the CALLER has voted, false for nobody signed in;",
-    "the Python backend sends it on list and detail, the Node backend does not yet.",
-    "`canTriage` (3.3.0) is the app's own is_admin answer for the caller: a top-level field of the list body and on the detail."
+    "Caller fields (3.3.0) are listed in `callerFields`, not in the two lists above."
   ],
   "products": ["PikPak", "Seal", "Placement", "Internal"],
   "appProducts": {
@@ -183,6 +180,16 @@
     "leaphq": "Internal"
   },
   "priorities": ["now", "next", "later"],
+  "_callerFields": [
+    "Fields that describe the CALLER, not the report, like `canNotify` (which",
+    "this contract has never listed either). The Python backend sends them,",
+    "the Node backend does not yet. `myVote` is on every list row and the",
+    "detail: whether the caller has voted (false for nobody signed in; the",
+    "caller is the checked identity, or in claims mode the request's own",
+    "`actorEmail`, never the app's default actor). `canTriage` is the app's own",
+    "is_admin answer, a top-level field of the list body and on the detail."
+  ],
+  "callerFields": ["myVote", "canTriage"],
   "triageFields": ["area", "priority", "owner", "parentId", "duplicateOf"],
   "listFilters": ["status", "days", "app", "kind", "area", "priority"],
 
@@ -204,8 +211,7 @@
     "metaUrl",
     "metaUserAgent",
     "metaBuildSha",
-    "audit",
-    "canTriage"
+    "audit"
   ],
   "optionalDetailFields": ["transcript"],
 

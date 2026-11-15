@@ -118,7 +118,7 @@ paths:
                       $ref: "#/components/schemas/BugSummary"
                   canTriage:
                     type: boolean
-                    description: Whether the caller may triage (the app's `is_admin` answer; 3.3.0, the Python backend only).
+                    description: A caller field, like `canNotify`. Whether the caller may triage (the app's `is_admin` answer; 3.3.0, the Python backend only).
 
   /bugs/{id}:
     parameters:
@@ -468,7 +468,7 @@ components:
           description: Count of people who voted (3.0.0); 0 on a v2 record.
         myVote:
           type: boolean
-          description: Whether the caller has voted (3.3.0; the Python backend only, the Node backend does not send it). False when nobody is signed in.
+          description: A caller field, like `canNotify`, not a property of the report. Whether the caller has voted (3.3.0; the Python backend only). False when nobody is signed in; never answered for the app's default actor.
 
     Bug:
       allOf:
@@ -482,7 +482,7 @@ components:
             metaBuildSha: { type: string }
             canTriage:
               type: boolean
-              description: Whether the caller may triage (the app's `is_admin` answer; 3.3.0, the Python backend only).
+              description: A caller field, like `canNotify`. Whether the caller may triage (the app's `is_admin` answer; 3.3.0, the Python backend only).
             canNotify:
               type: boolean
               description: |

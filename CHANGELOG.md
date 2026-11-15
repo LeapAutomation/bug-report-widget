@@ -10,7 +10,7 @@ A UI can show the vote button's state. Additive; the report contract gains one f
 - **Votes answer with the caller's state.** `POST /bugs/{id}/vote` by someone who already voted is a 200 with `{voted: true, votes: <count>}` and the count unchanged; `DELETE` answers `{voted: false, votes: <count>}` whether or not there was a vote. `voted` is read from the store after the change.
 - **`Store.voted_among(bug_ids, voter) -> set[str]`** on `InMemoryStore`, `FilesystemStore` and `PostgresStore`. The Postgres list stays at a fixed number of queries however long it is (a test counts them).
 - **`canTriage`** (true/false): the app's own `is_admin` answer for the caller, a top-level field of the `GET /bugs` body and on the detail. Since 3.2.0 a non-admin's list is a 200, so "the list worked" no longer means "admin"; apps use this instead. False with no identity (as the app's `is_admin` decides). The proxy passes it through unchanged (tested).
-- `report-contract.json` (`summaryFields`, example), `types.py`, `types.ts` and `openapi.yaml` carry `myVote`. The Node backend does not send it: its list is admin-only, so it is documented as not ported, as 3.2.0 did for visibility. `report-contract.json` is mirrored byte-identically elsewhere, so its copies need re-mirroring.
+- `report-contract.json` (a `callerFields` entry, not `summaryFields`/`detailFields`: they describe the caller, like `canNotify`; and the example), `types.py`, `types.ts` and `openapi.yaml` carry `myVote`. The Node backend does not send it: its list is admin-only, so it is documented as not ported, as 3.2.0 did for visibility. `report-contract.json` is mirrored byte-identically elsewhere, so its copies need re-mirroring.
 
 ## backends v3.2.0 - 2026-11-15 (`bug-report-py` 3.2.0)
 

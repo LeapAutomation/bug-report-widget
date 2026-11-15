@@ -65,5 +65,6 @@ Additive; a v2 record and a v2 client work unchanged. See `report-contract.json`
 All additive and optional, so older data and older clients keep working:
 
 - `actorName` on a report and `changedByName` on an audit row: the display name beside the address. `""` when unknown. A reader derives a name from the address when it is empty (split the local part on `.` `_` `-`, capitalise each part: `chris.hamblin@x` is "Chris Hamblin", `ken@x` is "Ken"); the first name is the first word.
+- `myVote` (every list row and the detail) and `canTriage` (the list body and the detail), 3.3.0, Python backend only: caller fields, like `canNotify`, not part of the report. `myVote` is whether the caller has voted; `canTriage` is the app's `is_admin` answer.
 - `canNotify` on `GET /bugs/{id}` only: this server can email the reporter and the report has an `actorEmail`.
 - `PATCH` takes `notify: true` (default false). It is acted on only when the status actually changes to `resolved` or `declined` (reopening never emails), needs a non-empty `note`, and writes the change and its audit row before the send. The response gains `notified: {ok, to, error?}`; a second audit row (from = to = the new status) records `emailed <name> <address>` or `email to <name> <address> failed: <reason>`. The Node backend has no mailer: it ignores `notify` and returns no `notified`.

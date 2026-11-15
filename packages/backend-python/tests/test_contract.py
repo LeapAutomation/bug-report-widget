@@ -126,3 +126,8 @@ def test_a_stored_kind_beats_the_tags_and_an_undeclared_kind_does_not():
     assert contract.effective_kind("capability", ["feature"]) == "feature"   # not a kind: fall back to the tags
     assert contract.effective_kind(None, []) == "bug"
     assert contract.with_kind({"kind": "feature", "tags": ["bug"]})["kind"] == "feature"
+
+
+def test_caller_fields_describe_the_caller_and_are_in_neither_field_list():
+    assert SPEC["callerFields"] == ["myVote", "canTriage"]
+    assert not set(SPEC["callerFields"]) & (set(SPEC["summaryFields"]) | set(SPEC["detailFields"]))

@@ -339,3 +339,12 @@ def test_can_triage_and_my_vote_pass_through_the_proxy_unchanged(front):
     listed = front.c.get("/api/bugs?days=1").get_json()
     assert listed["canTriage"] is False and listed["bugs"][0]["myVote"] is False
     assert front.c.get(f"/api/bugs/{feat}").get_json()["canTriage"] is False
+
+
+def test_no_identity_through_the_proxy_is_not_triage_and_not_a_vote(front):
+    feat = file(front, tags=["feature"])
+    front.c.post(f"/api/bugs/{feat}/vote")
+    front.person[0] = {"email": "", "name": ""}
+    listed = front.c.get("/api/bugs?days=1").get_json()
+    assert listed["canTriage"] is False
+    assert all(b["myVote"] is False for b in listed["bugs"])

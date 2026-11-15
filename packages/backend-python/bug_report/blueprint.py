@@ -313,11 +313,13 @@ def create_blueprint(
         counter = getattr(store, "vote_counts", None)
         return counter(ids) if counter and ids else {}
 
-    def _my_votes(ids) -> set:
-        """Which of ``ids`` the caller (the same person the vote routes use) has voted on;
-        nobody signed in, or a store that predates votes, means none. One store call per list."""
+    def _my_votes(ids, who=None) -> set:
+        """Which of ``ids`` the caller has voted on. A READ asks as ``_caller_email`` does, never as
+        the app's default actor; the vote routes pass the voter they used. Nobody signed in, or a
+        store that predates votes, means none. One store call per list."""
         finder = getattr(store, "voted_among", None)
-        who = _voter(request)
+        if who is None:
+            who = _caller_email(request)
         return set(finder(ids, who)) if finder and ids and who else set()
 
     def _detail(bug) -> dict:
@@ -551,7 +553,9 @@ def create_blueprint(
             return jsonify({"error": "not found"}), 404
         # `voted` is whether the caller's vote stands now: a repeat POST is a 200 that says true,
         # a DELETE with nothing to take back says false.
-        return jsonify({"votes": store.vote_counts([bug_id]).get(bug_id, 0), "voted": bug_id in _my_votes([bug_id])})
+        # (a store without `voted_among` cannot say, so `adding` stands)
+        voted = bug_id in _my_votes([bug_id], voter) if hasattr(store, "voted_among") else adding
+        return jsonify({"votes": store.vote_counts([bug_id]).get(bug_id, 0), "voted": voted})
 
     @bp.route(f"{url_prefix}/<bug_id>/vote", methods=["POST"])
     def api_vote(bug_id: str):
