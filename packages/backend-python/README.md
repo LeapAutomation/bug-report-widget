@@ -42,9 +42,9 @@ Routes mounted (under the prefix you pass):
 
 **What a non-admin sees (3.2.0).** A caller for whom `is_admin` is false gets, from the list, only reports with `kind=feature`
 (so people can see and vote on them) and their own reports (`actor_email` equals the caller, any kind). Detail, screenshot and vote
-on anyone else's report are 403; triage (PATCH) stays admin-only. A list with `status=open` therefore counts only what the caller can
+on anyone else's report are 404, the same answer as a missing id (nothing leaks); triage (PATCH) stays admin-only. A list with `status=open` therefore counts only what the caller can
 see. The caller is the checked `actor_identity` when the app gave one (with `TrustedCallers`, the `X-Leap-Actor-*` headers), else the
-request's own `actorEmail`, so without `actor_identity` this is advice, not a boundary. Admins see everything.
+request's own `actorEmail` (never `default_actor_email`), so without `actor_identity` this is advice, not a boundary. Admins see everything.
 
 **Ids.** New ids are `bug-YYYYMMDD-HHMMSS-` plus 6 lowercase hex; 12 hex is accepted too (reports imported from LeapHQ), and nothing else.
 

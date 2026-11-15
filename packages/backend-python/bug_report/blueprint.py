@@ -284,8 +284,12 @@ def create_blueprint(
 
     def _caller_email(req) -> str:
         """The caller's address, for what a non-admin may see: the checked identity when the app
-        gave one, else (as for filing) the request's own claim. "" is nobody."""
-        return _voter(req).lower()
+        gave one, else the request's own claim. Never `default_actor_email`: that is who an unsigned
+        filing is credited to, and it must not make everyone that person when they ask what they may see."""
+        if actor_identity is not None:
+            return _identity(req)[0].lower()
+        body = req.get_json(silent=True) if req.is_json else None
+        return str((body or {}).get("actorEmail") or req.args.get("actorEmail") or "").strip()[:200].lower()
 
     def _visible(bug, me: str) -> bool:
         """What a non-admin may see (3.2.0): every feature request, and the caller's own reports."""
@@ -294,6 +298,12 @@ def create_blueprint(
 
     def _may_see(bug) -> bool:
         return bool(is_admin(request)) or _visible(bug, _caller_email(request))
+
+    def _seen(bug):
+        """The report, or NotFound: one a caller may not see answers exactly as a missing one does."""
+        if not _may_see(bug):
+            raise NotFound()
+        return bug
 
     def _vote_counts(ids):
         """Votes per report; a store that predates votes counts none."""
@@ -313,11 +323,9 @@ def create_blueprint(
         if not valid_bug_id(bug_id):
             return jsonify({"error": "invalid id"}), 400
         try:
-            bug = store.get_bug(bug_id)
+            bug = _seen(store.get_bug(bug_id))
         except NotFound:
             return jsonify({"error": "not found"}), 404
-        if not _may_see(bug):
-            abort(403)
         full = _detail(bug)
         full["canNotify"] = bool(notifier is not None and bug.actor_email)
         return jsonify(full)
@@ -525,8 +533,7 @@ def create_blueprint(
         if not hasattr(store, "add_vote"):
             return jsonify({"error": "this store does not keep votes"}), 501
         try:
-            if not _may_see(store.get_bug(bug_id)):
-                abort(403)
+            _seen(store.get_bug(bug_id))
             (store.add_vote if adding else store.remove_vote)(bug_id, voter)
         except NotFound:
             return jsonify({"error": "not found"}), 404
@@ -547,8 +554,7 @@ def create_blueprint(
         if not valid_bug_id(bug_id):
             abort(400)
         try:
-            if not _may_see(store.get_bug(bug_id)):
-                abort(403)
+            _seen(store.get_bug(bug_id))
             data = store.get_screenshot(bug_id)
         except NotFound:
             abort(404)

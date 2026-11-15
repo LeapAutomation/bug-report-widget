@@ -7,7 +7,7 @@ All notable changes to this monorepo.
 What LeapHQ's move needs from the library (Ken's decisions 1 and 3). The report contract is unchanged.
 
 - **Ids may end in 12 hex.** `valid_bug_id`, the Node backend's check and the spec's pattern accept `bug-YYYYMMDD-HHMMSS-` plus 6 or 12 lowercase hex, and nothing else; new ids stay 6 hex. A drift test keeps the spec and both backends on one pattern. (The spec's example id was 7 hex, which the code always refused; it is 6 now.)
-- **A non-admin lists features and their own reports.** `GET /bugs` is no longer a 403 for a caller who is not an admin: it returns reports with `kind=feature` and reports whose `actor_email` is the caller. Detail, screenshot and vote on anyone else's report are 403; PATCH stays admin-only. The open count a non-admin gets counts only what they see. Admins are unchanged. The person comes from `actor_identity`, as before. Python only: the Node backend still gates by `isAdmin` alone.
+- **A non-admin lists features and their own reports.** `GET /bugs` is no longer a 403 for a caller who is not an admin: it returns reports with `kind=feature` and reports whose `actor_email` is the caller. Detail, screenshot and vote on anyone else's report are 404, the same answer as a missing id, and `default_actor_email` never makes a caller anyone; PATCH stays admin-only. The open count a non-admin gets counts only what they see. Admins are unchanged. The person comes from `actor_identity`, as before. Python only: the Node backend's list stays admin-only (documented, not ported).
 
 ## backends v3.1.0 - 2026-11-15 (`bug-report-py` 3.1.0)
 

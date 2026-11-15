@@ -141,7 +141,7 @@ def test_a_non_admin_person_sees_features_and_their_own_through_the_proxy(front)
     ids = lambda r: {b["id"] for b in r.get_json()["bugs"]}          # noqa: E731
     r = front.c.get("/api/bugs?days=1")
     assert r.status_code == 200 and ids(r) == {feat, own}            # not the admin's bug
-    assert front.c.get(f"/api/bugs/{mine}").status_code == 403
+    assert front.c.get(f"/api/bugs/{mine}").status_code == 404
     assert front.c.get(f"/api/bugs/{own}").status_code == 200
     assert front.c.post(f"/api/bugs/{feat}/vote").get_json()["voted"] is True
     assert front.c.patch(f"/api/bugs/{own}", json={"area": "x"}).status_code == 403

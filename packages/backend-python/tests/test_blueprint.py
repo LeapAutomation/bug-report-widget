@@ -246,7 +246,7 @@ def test_admin_gate_blocks_patch_and_filters_list(store, admin_deny):
     c = app.test_client()
     bid = c.post("/bugs", json={"details": "anyone can file"}).get_json()["id"]
     assert c.get("/bugs").get_json() == {"bugs": []}      # a bug filed by nobody is no one's to see
-    assert c.get(f"/bugs/{bid}").status_code == 403
+    assert c.get(f"/bugs/{bid}").status_code == 404
     assert c.patch(f"/bugs/{bid}", json={"status": "triaged"}).status_code == 403
 
 

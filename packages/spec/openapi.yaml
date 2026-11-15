@@ -69,7 +69,7 @@ paths:
                 $ref: "#/components/schemas/Error"
 
     get:
-      summary: List bug reports (an admin sees all; anyone else sees feature requests and their own)
+      summary: List bug reports (admin; the Python backend, 3.2.0, lets anyone else list feature requests and their own - the Node backend is admin-only)
       operationId: listBugs
       parameters:
         - in: query
@@ -533,7 +533,9 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
     NotFound:
-      description: No bug with this ID
+      description: |
+        No bug with this ID. The Python backend (3.2.0) answers the same 404, with the same body, for a report the caller may
+        not see (a non-admin asking for someone else's report) on detail, screenshot and vote, so a hidden report cannot be told from a missing one.
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }

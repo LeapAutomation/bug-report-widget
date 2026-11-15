@@ -53,6 +53,8 @@ In practice the leap-timesheet migration plan is to lift `createBugsRouter` and 
 | PATCH  | /:id                  | `isAdmin`   |
 | GET    | /:id/screenshot       | open        |
 
+**Not ported (backends 3.2.0).** The Python backend lets a non-admin list feature requests and their own reports, and answers 404 for a report they may not see. The Node backend does not: its list stays admin-only through `isAdmin`, and detail and screenshot stay open. Only the 6-or-12-hex id rule is shared.
+
 ## Stores
 
 | Class | Purpose |

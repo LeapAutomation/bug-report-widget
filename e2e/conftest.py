@@ -75,7 +75,7 @@ from bug_report import create_blueprint, FilesystemStore
 app = Flask(__name__)
 app.register_blueprint(create_blueprint(
     store=store,
-    is_admin=lambda req: True,
+    is_admin={admin},
     {hooks}
 ))
 app.run(host="127.0.0.1", port={port}, use_reloader=False)
@@ -91,9 +91,9 @@ V3_HOOKS = """actor_identity=lambda r: {"email": r.headers.get("X-Test-User", ""
     app_stamp=lambda r: r.headers.get("X-Test-App") or None,"""
 
 
-def _boot_python(tmp_path_factory, label, store_init, hooks=""):
+def _boot_python(tmp_path_factory, label, store_init, hooks="", admin="lambda req: True"):
     port = _free_port()
-    script = PY_SERVER_SCRIPT.format(pkg=str(PY_PKG), store_init=store_init, hooks=hooks, port=port)
+    script = PY_SERVER_SCRIPT.format(pkg=str(PY_PKG), store_init=store_init, hooks=hooks, admin=admin, port=port)
     log = tmp_path_factory.mktemp(f"{label}-log") / "out.log"
     return port, script, log
 
@@ -103,9 +103,9 @@ def python_server(tmp_path_factory):
     yield from _serve_python(tmp_path_factory, "py", FS_INIT.format(state=tmp_path_factory.mktemp("py-state")))
 
 
-def _serve_python(tmp_path_factory, label, store_init, hooks=""):
+def _serve_python(tmp_path_factory, label, store_init, hooks="", admin="lambda req: True"):
     """Boot a Python backend subprocess; yield its /bugs URL; stop it."""
-    port, script, log = _boot_python(tmp_path_factory, label, store_init, hooks)
+    port, script, log = _boot_python(tmp_path_factory, label, store_init, hooks, admin)
     with open(log, "w") as logf:
         proc = subprocess.Popen([sys.executable, "-c", script], stdout=logf, stderr=subprocess.STDOUT)
     base = f"http://127.0.0.1:{port}/bugs"
@@ -140,6 +140,13 @@ def python_pg_server(tmp_path_factory, pg_dsn, pg_schema_name):
 def python_v3_server(tmp_path_factory):
     yield from _serve_python(tmp_path_factory, "pyv3", FS_INIT.format(state=tmp_path_factory.mktemp("py-v3-state")),
                              V3_HOOKS)
+
+
+@pytest.fixture(scope="session")
+def python_nonadmin_server(tmp_path_factory):
+    """Python only: the caller is `X-Test-User`, and is an admin only with `X-Test-Admin: yes` (3.2.0)."""
+    yield from _serve_python(tmp_path_factory, "pyna", FS_INIT.format(state=tmp_path_factory.mktemp("py-na-state")),
+                             V3_HOOKS, admin='lambda r: r.headers.get("X-Test-Admin") == "yes"')
 
 
 @pytest.fixture(scope="session")
