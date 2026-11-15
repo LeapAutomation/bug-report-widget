@@ -38,7 +38,7 @@ import http.client
 import json
 import logging
 from typing import Callable, Mapping
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 from .trust import TRUST_REFUSAL_HEADER
 
@@ -84,16 +84,22 @@ def forward(
 ) -> tuple[int, bytes, dict]:
     """Forward one ``/bugs`` request to the central service; return ``(status, body, headers)``.
 
-    ``rest`` is the path after ``/bugs`` ("" for the collection, "<id>", "<id>/vote", ...), ``query``
+    ``rest`` is the path after ``/bugs`` ("" for the collection, "<id>", "<id>/vote", ...), in either form:
+    raw from the request line (``a%20b``, ``%2e%2e``) or already decoded (Flask's). It is percent-decoded once,
+    checked for ``..``, ``.`` and ``\\`` segments (400, nothing sent), and each segment re-quoted going out. ``query``
     the raw query string without the "?", ``body`` the request body (sent for POST, PATCH and DELETE
     only), ``browser_headers`` the browser's request headers (only Content-Type and Accept are taken,
     any case). Never raises for a service or network problem: those are 502s.
     """
     target = _target(central_url)
     method = method.upper()
-    if any(seg in ("..", ".") or "\\" in seg for seg in rest.split("/")):
+    # `rest` may be percent-encoded or already decoded (Flask hands over a decoded one): it is decoded here, once,
+    # BEFORE the dot-dot and backslash refusal, so `%2e%2e` and `%5c` are refused whichever way the caller got
+    # it, and each segment is re-quoted for the outgoing path.
+    segments = unquote(rest).split("/") if rest else []
+    if any(seg in ("..", ".") or "\\" in seg for seg in segments):
         return _err(400, "invalid path")
-    path = target.path.rstrip("/") + ("/" + rest if rest else "")
+    path = target.path.rstrip("/") + "".join("/" + quote(seg, safe="") for seg in segments)
     # The list is this app's own reports unless the caller says otherwise (3.0.1): the open count and
     # the queue must not show every app's, which is what the service gives a trusted app with no filter.
     if method == "GET" and not rest and "app" not in {p.split("=", 1)[0] for p in query.split("&") if p}:

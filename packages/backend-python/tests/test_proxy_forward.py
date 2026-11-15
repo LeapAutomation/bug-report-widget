@@ -190,3 +190,34 @@ def test_a_bad_central_url_raises():
     import pytest
     with pytest.raises(ValueError):
         forward("GET", "", "", None, {}, central_url="ftp://x", app="a", token_provider=lambda: "t", person_provider=lambda: {})
+
+
+def test_percent_encoded_dot_dot_and_backslash_are_400_and_never_sent(central):
+    _, _, seen = central
+    c = Caller(central[0].url)
+    n = len(seen)
+    for rest in ("%2e%2e", "%2E%2E/x", "x/%2e%2E/y", "%5c", "a%5Cb", "%2e", "a/%2E"):
+        status, body, _ = c("GET", rest)
+        assert (status, json.loads(body)) == (400, {"error": "invalid path"}), rest
+    assert len(seen) == n
+
+
+def test_an_id_with_escapes_round_trips_whether_the_caller_passes_it_raw_or_decoded():
+    from flask import Flask, request
+    other = Flask(__name__)
+    got = []
+
+    @other.route("/bugs/<path:rest>")
+    def echo(rest):
+        got.append(request.environ["RAW_URI"] if "RAW_URI" in request.environ else request.full_path)
+        return rest
+
+    s = Serving(other)
+    try:
+        for passed in ("a%20b/c", "a b/c"):
+            status, body, _ = forward("GET", passed, "", None, {}, central_url=s.url + "/bugs", app="a",
+                                      token_provider=lambda: "t", person_provider=lambda: {})
+            assert (status, body) == (200, b"a b/c"), passed
+        assert all("a%20b/c" in g for g in got), got
+    finally:
+        s.stop()

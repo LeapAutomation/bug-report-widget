@@ -35,6 +35,7 @@ LeapHQ Review ──(LeapHQ's own identity, a token)──► leaphq-reports (on
   - It is the only place reports are stored, emails are sent and triage rights are checked: one `BUG_ADMINS`, and one sending identity (`leaphq-bug-notify`).
 - **The apps keep their URL.** Each app's `/api/bugs` becomes `create_proxy_blueprint(central_url, app="placements")` from the library.
   - It forwards every route (POST, list, detail, PATCH and screenshot) with its body unchanged.
+  - An app that is not Flask (the daily report's `http.server`) calls the framework-free core, `bug_report.proxy.forward()`, which the blueprint wraps.
   - The widget, BugQueue and every page that links to a report keep working, with no front-end change.
   - The app stamps `app`; the caller cannot set it.
 - **Who is asking.** Every request carries a token: the calling app's **own managed identity** (an Entra token). There is no person path on the service, so a request with no token is 401 and the service never reads `X-Ms-Client-Principal` or Tailscale headers.

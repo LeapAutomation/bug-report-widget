@@ -12,6 +12,7 @@ The proxy's core is a plain function. No contract change.
   a list defaults to `app=<app>`; only `Content-Type` and `Accept` come from the browser; the bearer token and `X-Leap-*` headers
   are added; a marked trust refusal and a short body are 502; `http.client` with no `Connection: close`; generic 502 bodies; only
   the contract's response headers come back.
+- `forward()` takes `rest` raw or decoded: it decodes once before refusing `..` and `\`, so `%2e%2e` and `%5c` are 400 whatever the caller passes, and re-quotes each outgoing segment.
 - `create_proxy_blueprint` is now a thin Flask wrapper over `forward` (Flask is imported inside it). Its behaviour and tests are unchanged.
 
 ## backends v3.0.2 — 2026-11-15 (`bug-report-py` 3.0.2)

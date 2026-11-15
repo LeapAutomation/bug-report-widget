@@ -136,7 +136,7 @@ status, body, headers = forward(
 ```
 
 It returns `(status, body_bytes, headers_dict)` and never raises for a service or network problem (those are 502s). The
-package still installs Flask as a dependency; `forward` itself imports none of it.
+package still depends on Flask and `import bug_report` imports it; `forward()` itself uses no Flask. `rest` may be raw from the request line (`a%20b`, `%2e%2e`) or already decoded; it is decoded once and `..`, `.` and `\` segments are refused (400, nothing sent) either way.
 
 ## The service side: who is calling (3.0.0)
 
