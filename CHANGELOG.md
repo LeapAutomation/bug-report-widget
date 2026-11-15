@@ -2,6 +2,16 @@
 
 All notable changes to this monorepo.
 
+## backends v3.0.2 — 2026-11-15 (`bug-report-py` 3.0.2)
+
+One fix to `create_proxy_blueprint`, found on the seal viewer's first live day. No contract change.
+
+- **The proxy never asks the service to close the connection.**
+  - **The problem:** Azure Container Apps' internal ingress cuts a large response short when the request says `Connection: close`, and `urllib` always does.
+  - **The evidence:** a 761 KB screenshot through seal's proxy arrived as 65 to 311 KB, 3 times out of 3. Without that header it arrived whole, 3 times out of 3.
+  - **The fix:** the proxy now goes out over `http.client`, which follows no redirects, as before.
+- **A body that arrives short is a 502** (`the reports service's answer came back incomplete`, logged with the byte counts). It is never a crash (500) or a short 200.
+
 ## backends v3.0.1 — 2026-11-14 (`bug-report-py` 3.0.1)
 
 Two fixes to `create_proxy_blueprint` from the first review of the seal viewer's move. No contract change.

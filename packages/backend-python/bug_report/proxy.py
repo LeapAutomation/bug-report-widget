@@ -21,15 +21,20 @@ APP (``X-Leap-Trust-Refusal``) comes back as a 502; its other 401/403 (not an
 admin, sign in to vote) pass through. Any ``Authorization`` or
 ``X-Leap-*`` header the browser sent is dropped: the app's own identity, not
 the page's claim, is what the service looks at. Standard library only.
+
+The request goes out over ``http.client`` and never says ``Connection: close``
+(3.0.2). Azure Container Apps' internal ingress cuts a large response short when
+the request asks to close the connection - ``urllib`` always does - so a 761 KB
+screenshot arrived as 65-311 KB and the proxy crashed (2026-11-15). A body that
+still arrives short is a 502, never a truncated 200.
 """
 from __future__ import annotations
 
+import http.client
 import json
 import logging
-import urllib.error
-import urllib.request
 from typing import Callable
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from flask import Blueprint, Response, request
 
@@ -37,14 +42,6 @@ from .trust import TRUST_REFUSAL_HEADER
 
 log = logging.getLogger(__name__)
 
-
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    """A 302 (a signed screenshot URL) goes back to the browser as it is."""
-    def redirect_request(self, *a, **kw):
-        return None
-
-
-_OPENER = urllib.request.build_opener(_NoRedirect)
 
 #: request headers passed on from the browser; everything else is dropped
 _FORWARD = ("Content-Type", "Accept")
@@ -63,6 +60,10 @@ def create_proxy_blueprint(
 ) -> Blueprint:
     bp = Blueprint(f"bug_report_proxy_{app}", __name__)
     base = central_url.rstrip("/")
+    target = urlsplit(base)
+    if target.scheme not in ("http", "https") or not target.hostname:
+        raise ValueError(f"central_url must be an http(s) URL: {central_url!r}")
+    connection = http.client.HTTPSConnection if target.scheme == "https" else http.client.HTTPConnection
 
     def _ascii(v: str) -> str:
         return quote(v or "", safe=" @.+-_'")
@@ -72,14 +73,14 @@ def create_proxy_blueprint(
     def forward(rest: str):
         if any(seg in ("..", ".") or "\\" in seg for seg in rest.split("/")):
             return _err(400, "invalid path")
-        url = base + ("/" + rest if rest else "")
+        path = target.path + ("/" + rest if rest else "")
         query = request.query_string.decode("latin-1")
         # The list is this app's own reports unless the caller says otherwise (3.0.1): the open count and
         # the queue must not show every app's, which is what the service gives a trusted app with no filter.
         if request.method == "GET" and not rest and "app" not in request.args:
             query = (query + "&" if query else "") + "app=" + quote(app, safe="")
         if query:
-            url += "?" + query
+            path += "?" + query
         try:
             person = person_provider() or {}
             headers = {h: request.headers[h] for h in _FORWARD if h in request.headers}
@@ -93,18 +94,21 @@ def create_proxy_blueprint(
             log.warning("reports proxy (%s): could not get a token or identity: %s", app, e)
             return _err(502, "could not authenticate to the reports service")
         data = request.get_data() if request.method in ("POST", "PATCH", "DELETE") else None
-        req = urllib.request.Request(url, data=data, headers=headers, method=request.method)
+        conn = connection(target.hostname, target.port, timeout=timeout)
         try:
-            with _OPENER.open(req, timeout=timeout) as r:
-                return _relay(r.status, r.read(), r.headers)
-        except urllib.error.HTTPError as e:   # a 3xx/4xx/5xx from the service is its answer
-            try:
-                return _relay(e.code, e.read(), e.headers)
-            finally:
-                e.close()
-        except (urllib.error.URLError, OSError, TimeoutError) as e:
-            log.warning("reports proxy (%s): %s unreachable: %s", app, url, getattr(e, "reason", e))
+            # Any status - 3xx (a signed screenshot URL goes back as it is), 4xx, 5xx - is the service's answer.
+            conn.request(request.method, path, body=data, headers=headers)
+            r = conn.getresponse()
+            return _relay(r.status, r.read(), r.headers)
+        except http.client.IncompleteRead as e:
+            log.warning("reports proxy (%s): %s came back short: %d bytes, %s more expected",
+                        app, path, len(e.partial), e.expected)
+            return _err(502, "the reports service's answer came back incomplete")
+        except (http.client.HTTPException, OSError, TimeoutError) as e:
+            log.warning("reports proxy (%s): %s unreachable: %s", app, path, e)
             return _err(502, "the reports service is not reachable")
+        finally:
+            conn.close()
 
     def _relay(status, body, upstream_headers):
         if status in (401, 403) and upstream_headers.get(TRUST_REFUSAL_HEADER):

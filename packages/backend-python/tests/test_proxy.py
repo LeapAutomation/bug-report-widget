@@ -283,3 +283,40 @@ def test_the_central_service_itself_refuses_a_request_with_no_token(central):
             raise AssertionError("expected 401")
         except urllib.error.HTTPError as e:
             assert e.code == 401
+
+
+# ---- 3.0.2: never ask the service to close the connection; a short body is a 502 -------------------
+
+def test_the_forwarded_request_never_asks_to_close_the_connection(central, front):
+    # Azure Container Apps' internal ingress cut a 761 KB screenshot short whenever the request said
+    # "Connection: close" (urllib always does): 3 of 3 short, 3 of 3 whole without it (2026-11-15).
+    _, _, seen = central
+    file(front)
+    front.c.get("/api/bugs")
+    assert seen and all(h.get("Connection", "").lower() != "close" for h in seen), [h.get("Connection") for h in seen]
+
+
+def test_a_body_that_arrives_short_is_a_502_not_a_crash_or_a_short_200():
+    import socket
+
+    lsock = socket.socket()
+    lsock.bind(("127.0.0.1", 0))
+    lsock.listen(1)
+    port = lsock.getsockname()[1]
+
+    def serve_short():
+        conn, _ = lsock.accept()
+        conn.recv(65536)
+        conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: 100000\r\n\r\n" + b"x" * 1000)
+        conn.close()
+
+    t = threading.Thread(target=serve_short, daemon=True)
+    t.start()
+    flask_app = Flask(__name__)
+    flask_app.register_blueprint(create_proxy_blueprint(
+        f"http://127.0.0.1:{port}/bugs", "placements", lambda: "ok:client-placements",
+        lambda: {"email": "admin@example.com"}), url_prefix="/api")
+    r = flask_app.test_client().get("/api/bugs/bug-20261103-133031-e19b68/screenshot")
+    t.join(3)
+    lsock.close()
+    assert r.status_code == 502 and "incomplete" in r.get_json()["error"]

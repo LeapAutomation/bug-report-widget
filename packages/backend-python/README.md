@@ -116,7 +116,7 @@ not followed). Each forwarded request carries `Authorization: Bearer <token_prov
 sign-in failed" (a seal laptop's outbox) must never be told that about a setup mistake. The blueprint's own 403 (not an admin)
 and 401 (sign in to vote) pass through. A list with no `app` query is asked for as `app=<this app>` (3.0.1); an explicit `app`
 passes through. A `..` path segment is refused (400). A service that cannot be reached is a 502, and a token or identity that cannot be
-produced is a 502 with nothing sent; the 502 bodies are generic (the reason goes to the log, not the browser). Standard library only (urllib).
+produced is a 502 with nothing sent; the 502 bodies are generic (the reason goes to the log, not the browser). Standard library only (`http.client`; it never sends `Connection: close`, which Azure Container Apps' internal ingress answers by cutting large responses short).
 
 ## The service side: who is calling (3.0.0)
 
