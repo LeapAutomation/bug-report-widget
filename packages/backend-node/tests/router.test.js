@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import express from "express";
-import { createBugsRouter, InMemoryStore, FilesystemStore } from "../src/index.js";
+import { createBugsRouter, InMemoryStore, FilesystemStore, validBugId } from "../src/index.js";
 
 // 1x1 transparent PNG.
 const TINY_PNG = Buffer.from(
@@ -76,7 +76,7 @@ for (const [name, makeStore] of STORES) {
       });
       assert.equal(r.status, 201);
       const { id } = await r.json();
-      assert.match(id, /^bug-\d{8}-\d{6}-[a-f0-9]{6}$/);
+      assert.ok(validBugId(id), id);
     });
   });
 

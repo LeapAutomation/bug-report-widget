@@ -128,3 +128,12 @@ def test_types_py_and_types_ts_name_every_v3_summary_field():
     for f in fields:
         assert re.search(rf"^\s+{f}\??:", ts, re.M), f"types.ts BugSummary lacks {f}"
         assert re.search(rf"^\s+{f}:", py, re.M), f"types.py BugSummary lacks {f}"
+
+
+def test_the_id_pattern_is_the_same_in_the_spec_the_python_model_and_the_node_model():
+    """3.2.0: ids end in 6 or 12 hex. The three places that match an id must carry one pattern."""
+    import re
+    from bug_report import models
+    spec = re.search(r"pattern: '(\^bug-[^']+)'", SPEC.read_text()).group(1)
+    node = re.search(r"BUG_ID_RE = /(.+)/;", (SPEC.parents[1] / "backend-node/src/models.js").read_text()).group(1)
+    assert models._BUG_ID_RE.pattern == spec == node

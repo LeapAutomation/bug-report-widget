@@ -128,3 +128,24 @@ def test_votes_one_per_person(v3_url):
     assert vote("a@example.com", "delete").json() == {"votes": 1, "voted": False}
     assert vote("").status_code == 401
     assert requests.post(f"{v3_url}/bug-20200101-000000-aaaaaa/vote", headers=ME).status_code == 404
+
+
+def test_a_non_admin_sees_features_and_their_own_and_nothing_else_of_others(python_nonadmin_server):
+    """PYTHON ONLY: the Node backend still gates its list by `isAdmin` alone (documented, not ported), so
+    this case has no Node twin and uses its own server rather than the three-backend `v3_url`."""
+    url, m = python_nonadmin_server, mark()
+    ann, bob = {"X-Test-User": "ann@example.com"}, {"X-Test-User": "bob@example.com"}
+
+    def mk(who, **kw):
+        r = requests.post(url, json={"details": f"{m} x", **kw}, headers=who)
+        assert r.status_code == 201, r.text
+        return r.json()["id"]
+
+    own, other, feat = mk(ann), mk(bob), mk(bob, kind="feature", tags=["feature"])
+    rows = requests.get(f"{url}?days=1", headers=ann).json()["bugs"]
+    assert {r["id"] for r in rows if m in r["title"]} == {own, feat}
+    assert requests.get(f"{url}/{other}", headers=ann).status_code == 404
+    assert requests.get(f"{url}/{other}/screenshot", headers=ann).status_code == 404
+    assert requests.get(f"{url}/{own}", headers=ann).status_code == 200
+    admin = {**ann, "X-Test-Admin": "yes"}
+    assert {r["id"] for r in requests.get(f"{url}?days=1", headers=admin).json()["bugs"] if m in r["title"]} == {own, other, feat}

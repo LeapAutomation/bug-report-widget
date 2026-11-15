@@ -58,7 +58,7 @@ export function screenshotContentType(data) {
   return "image/png";
 }
 
-const BUG_ID_RE = /^bug-\d{8}-\d{6}-[a-f0-9]{6}$/;
+const BUG_ID_RE = /^bug-\d{8}-\d{6}-(?:[a-f0-9]{6}|[a-f0-9]{12})$/;
 
 export function validBugId(id) {
   return typeof id === "string" && BUG_ID_RE.test(id);

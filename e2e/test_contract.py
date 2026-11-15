@@ -21,7 +21,7 @@ TINY_PNG = bytes.fromhex(
 TINY_PNG_B64 = base64.b64encode(TINY_PNG).decode()
 TINY_JPEG = bytes.fromhex("FFD8FFE000104A46494600010100000100010000FFD9")
 TINY_JPEG_B64 = base64.b64encode(TINY_JPEG).decode()
-ID_RE = re.compile(r"^bug-\d{8}-\d{6}-[a-f0-9]{6}$")
+from bug_report.models import _BUG_ID_RE as ID_RE   # the library's own pattern, not a copy
 
 
 # ----- POST ----------------------------------------------------------

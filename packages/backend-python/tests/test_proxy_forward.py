@@ -104,11 +104,11 @@ def test_a_refusal_of_the_app_is_a_502_with_a_generic_body_and_the_real_one_is_l
     assert c("POST", body=b'{"details": "x"}')[0] == 502
 
 
-def test_a_persons_403_and_401_pass_through(central):
+def test_a_persons_404_for_a_hidden_report_and_401_pass_through(central):
     c = Caller(central[0].url)
     bid = c.file()
     c.person = {"email": "someone@example.com", "name": ""}
-    assert c("GET")[0] == 403
+    assert c("GET", bid)[0] == 404            # someone else's bug (3.2.0: the list is filtered, not refused)
     c.person = {"email": "", "name": ""}
     assert c("POST", f"{bid}/vote")[0] == 401
 
