@@ -1,9 +1,19 @@
 # One store for every app's bug and feature reports
 
-**Status:** being built.
-- Library `backends-v3.0.0` shipped.
-- Service `LeapAutomation/leap-reports` deployed 2026-11-14.
-- Seal moves first.
+**Status:** LIVE for all six apps (2026-11-15). Every app files and triages in the one store, through its own `/api/bugs`.
+- Library `backends-v3.2.0`.
+- Service `LeapAutomation/leap-reports`.
+- Reports imported (each count-checked against an independent count of its source; screenshots loading; a test close emailed):
+  - seal 15;
+  - PIV 21;
+  - SV 90;
+  - daily report 7;
+  - fleet 63;
+  - LeapHQ 69.
+- **Not built yet:** the BugQueue's Product → App → Area roll-up, and the area, priority, owner, parent and duplicate fields in the UI. The store and the API carry them already.
+- **Old stores** are kept read-only for 30 days from cutover, then deleted on Ken's approval: Azure Files `bugs/` on four shares, fleet's Postgres `bugs`, LeapHQ's Azure Tables.
+
+**Triage list (Ken, 2026-11-15):** the service's `BUG_ADMINS` is LeapHQ's six admins, for every app.
 
 **Decided (Ken, 2026-11-14):**
 - one central store on Postgres (option A), not federation;
