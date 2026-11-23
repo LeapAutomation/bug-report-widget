@@ -87,7 +87,8 @@ and `onClientEvent` is told. `captureScreenshot` still returns `dataUrl | null`.
 and makes the rest of the page inert, so a 🐛 button on `<body>` cannot be clicked however
 high its z-index. The widget watches for an open modal dialog and moves its button, report
 form, viewer and toast into the topmost one (and back to `<body>` when it closes; a dialog
-removed from the page with them inside gives them back first). They are `position: fixed`, so
+removed from the page with them inside, on its own or with an ancestor as a framework unmounts it,
+gives them back first). They are `position: fixed`, so
 they stay where they are. Non-modal dialogs are ignored. If your app already does this itself it
 is harmless, and `reachOverDialogs: false` turns the built-in off.
 

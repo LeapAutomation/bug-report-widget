@@ -1,6 +1,6 @@
 {
   "name": "bug-report-widget",
-  "version": "1.6.8",
+  "version": "1.6.9",
   "description": "Self-injecting in-app bug-reporting widget with screenshot capture. Backend-agnostic; speaks the bug-report-widget API spec.",
   "main": "src/bug-report.js",
   "files": [
