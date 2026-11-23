@@ -1727,12 +1727,15 @@
       var doc = deps.document;
       if (!MO || !doc || !doc.documentElement || !doc.body) return;
       reachableStarted = true;
-      // Attributes only (`open` toggling) across the tree, children only on
-      // <body> (our form and viewer are appended there): moving our own nodes
-      // re-triggers at most one no-op pass.
+      // `open` toggling and child changes across the whole tree. Children on
+      // <body> alone missed a dialog that a framework (React) unmounts deep
+      // inside the page while it is open: the button went with it until a
+      // reload (1.6.9, the seal viewer). A pass is cheap - up to four
+      // getElementById calls per removed element, then one dialog[open] query -
+      // and moving our own nodes re-triggers at most one no-op pass.
       var mo = new MO(function (records) {
-        // A dialog taken out of <body> with our nodes still inside would take
-        // them with it: pull them back out before they are gone for good.
+        // A dialog taken out of the page with our nodes still inside (itself or
+        // with an ancestor) would take them with it: pull them back out before they are gone for good.
         (records || []).forEach(function (rec) {
           (rec.removedNodes ? Array.prototype.slice.call(rec.removedNodes) : []).forEach(function (n) {
             if (!n || n.nodeType !== 1 || !n.querySelector) return;
@@ -1746,8 +1749,7 @@
         });
         followDialogs();
       });
-      mo.observe(doc.documentElement, { subtree: true, attributes: true, attributeFilter: ["open"] });
-      mo.observe(doc.body, { childList: true });
+      mo.observe(doc.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["open"] });
       followDialogs();
     }
 

@@ -2,6 +2,21 @@
 
 All notable changes to this monorepo.
 
+## widget v1.6.9 - 2026-11-23
+
+From the seal viewer: its 🐞 button vanished until a reload after an open info dialog went with the
+pane that held it (Captures: the Thermal pane's ⓘ open, then Grid).
+
+- **Fix: a modal `<dialog>` removed deep inside the page no longer takes the widget's nodes with it.**
+  With `reachOverDialogs` on, the button (and form, viewer, toast) live inside the topmost open modal
+  dialog. The rescue that pulls them out of a removed dialog only saw children removed from `<body>`;
+  React unmounts a component inside `#root`, so the dialog's ancestor was removed and nothing noticed.
+  The observer now watches child changes across the whole tree (`childList` + `subtree` on
+  `<html>`); each pass is still a few `getElementById` calls per removed element and one
+  `dialog[open]` query. A test removes a modal dialog's wrapping `<div>` and delivers the record only
+  to an observer that watches it.
+- No option and no wire change.
+
 ## backends v3.3.0 - 2026-11-15 (`bug-report-py` 3.3.0)
 
 A UI can show the vote button's state. Additive; the report contract gains one field.

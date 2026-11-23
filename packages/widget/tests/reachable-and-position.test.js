@@ -111,6 +111,25 @@ test("a dialog removed from the page with our nodes inside does not take them wi
   assert.equal(s.btn().parentNode, s.doc.body);
 });
 
+test("a modal dialog deep inside the page, removed with an ancestor (a React unmount), does not take the button", () => {
+  const s = setup();
+  const root = s.doc.createElement("div"), wrap = s.doc.createElement("div");
+  s.doc.body.appendChild(root); root.appendChild(wrap);
+  const d = s.doc.createElement("dialog"); d._modal = true; wrap.appendChild(d);
+  s.open(d);
+  assert.equal(s.btn().parentNode, d);
+  wrap.remove();
+  // Deliver the record only to an observer that watches childList on its target, as a browser
+  // would: the removal is inside #root, not a child of <body>.
+  const rec = { type: "childList", target: root, removedNodes: [wrap] };
+  const contains = (a, b) => { for (let n = b; n; n = n.parentNode) if (n === a) return true; return false; };
+  s.observers.forEach((o) => {
+    if (o.targets.some(([t, opt]) => opt.childList && (t === root || (opt.subtree && contains(t, root))))) o.cb([rec]);
+  });
+  assert.ok(s.btn(), "pulled back out of the removed subtree");
+  assert.equal(s.btn().parentNode, s.doc.body);
+});
+
 test("the idPrefix is honoured", () => {
   const doc = makeDom();
   const d = doc.createElement("dialog"); d._modal = true; d.setAttribute("open", ""); doc.body.appendChild(d);
